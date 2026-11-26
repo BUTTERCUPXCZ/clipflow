@@ -26,6 +26,8 @@ const envSchema = z.object({
     .default('localhost:50052'),
   FRAME_SAMPLE_INTERVAL: z.coerce.number().positive().max(60).default(1),
   FRAME_MAX_WIDTH: z.coerce.number().int().min(64).max(3840).default(768),
+  VISION_MAX_FRAMES: z.coerce.number().int().min(1).max(600).default(60),
+  VISION_BATCH_SIZE: z.coerce.number().int().min(1).max(8).default(2),
   MEDIA_ROOT: z
     .string({ error: 'MEDIA_ROOT is required (directory for imported and generated media)' })
     .min(1)

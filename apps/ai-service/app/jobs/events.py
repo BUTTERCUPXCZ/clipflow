@@ -68,6 +68,41 @@ class JobEventsClient:
         )
         self._send("ReportFailure", request, attempts=self._terminal_attempts)
 
+    def experiment_progress(self, experiment_id: str, progress: int, message: str = "") -> bool:
+        request = pb2.ReportExperimentProgressRequest(
+            experiment_id=experiment_id, sequence=self._next_sequence(experiment_id), progress=progress, message=message
+        )
+        ack = self._send("ReportExperimentProgress", request, attempts=1)
+        return bool(ack and ack.stop)
+
+    def experiment_completed(self, experiment_id: str, output_path: str, metrics: dict) -> bool:
+        peak = metrics.get("peakVramMiB")
+        request = pb2.ReportExperimentCompletionRequest(
+            experiment_id=experiment_id,
+            sequence=self._next_sequence(experiment_id),
+            output_path=output_path,
+            metrics=pb2.ExperimentMetrics(
+                load_ms=metrics["loadMs"],
+                inference_ms=metrics["inferenceMs"],
+                total_ms=metrics["totalMs"],
+                peak_vram_mib=-1 if peak is None else peak,
+                frames_analysed=metrics["framesAnalysed"],
+                valid_batches=metrics["validBatches"],
+                total_batches=metrics["totalBatches"],
+            ),
+        )
+        ack = self._send("ReportExperimentCompletion", request, attempts=self._terminal_attempts)
+        return bool(ack and ack.stop)
+
+    def experiment_failed(self, experiment_id: str, code: str, message: str) -> None:
+        request = pb2.ReportExperimentFailureRequest(
+            experiment_id=experiment_id,
+            sequence=self._next_sequence(experiment_id),
+            error_code=pb2.JobErrorCode.Value(f"JOB_ERROR_CODE_{code}"),
+            error_message=message[:1000],
+        )
+        self._send("ReportExperimentFailure", request, attempts=self._terminal_attempts)
+
     def close(self) -> None:
         if self._channel is not None:
             self._channel.close()
@@ -80,6 +115,7 @@ class JobEventsClient:
         return sequence
 
     def _send(self, method: str, request, attempts: int):
+        job_id = getattr(request, "job_id", "") or getattr(request, "experiment_id", "")
         # The channel is created lazily: RQ forks per job, and gRPC channels must not cross a fork.
         if self._channel is None:
             self._channel = grpc.insecure_channel(self._target)
@@ -89,6 +125,6 @@ class JobEventsClient:
                 return getattr(stub, method)(request, timeout=self._timeout)
             except grpc.RpcError as exc:
                 if attempt == attempts:
-                    log.error("job_event_lost", method=method, job_id=request.job_id, error=str(exc.code()))
+                    log.error("job_event_lost", method=method, job_id=job_id, error=str(exc.code()))
                     return None
                 time.sleep(min(2**attempt, 10))

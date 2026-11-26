@@ -8,6 +8,7 @@ export const AI_SERVICE_GRPC = Symbol('AI_SERVICE_GRPC');
 export interface ModelInfo {
   name: string;
   sizeBytes: number;
+  vision: boolean;
 }
 
 export interface ModelStatus {
@@ -16,6 +17,7 @@ export interface ModelStatus {
   configuredVisionModel: string;
   configuredVisionModelInstalled: boolean;
   errorCode: 'ERROR_CODE_UNSPECIFIED' | 'ERROR_CODE_MODEL_RUNTIME_UNAVAILABLE';
+  workerRunning: boolean;
 }
 
 type ErrorCode =
@@ -54,12 +56,22 @@ export interface StartAnalysisResult {
 
 export type AnalysisState = 'QUEUED' | 'RUNNING' | 'FINISHED' | 'UNKNOWN';
 
+export interface StartExperimentRequest {
+  experimentId: string;
+  framesPath: string;
+  outputPath: string;
+  model: string;
+  maxFrames: number;
+  batchSize: number;
+}
+
 interface VideoAnalysisServiceGrpc {
   getModelStatus(request: Record<string, never>): Observable<ModelStatus>;
   probeVideo(request: { storagePath: string }): Observable<ProbeResult>;
   startAnalysis(request: StartAnalysisRequest): Observable<StartAnalysisResult>;
   cancelAnalysis(request: { jobId: string }): Observable<{ found: boolean }>;
   getAnalysisStatus(request: { jobId: string }): Observable<{ state: `ANALYSIS_STATE_${AnalysisState}` }>;
+  startExperiment(request: StartExperimentRequest): Observable<StartAnalysisResult>;
 }
 
 const DEADLINE_MS = 3000;
@@ -76,6 +88,8 @@ export interface AnalysisRunner {
   startAnalysis(request: StartAnalysisRequest): Promise<StartAnalysisResult>;
   cancelAnalysis(jobId: string): Promise<boolean>;
   getAnalysisStatus(jobId: string): Promise<AnalysisState>;
+  startExperiment(request: StartExperimentRequest): Promise<StartAnalysisResult>;
+  getModelStatus(): Promise<ModelStatus>;
 }
 
 @Injectable()
@@ -102,6 +116,10 @@ export class AiServiceClient implements OnModuleInit, MediaProbe, AnalysisRunner
 
   async cancelAnalysis(jobId: string): Promise<boolean> {
     return (await firstValueFrom(this.service.cancelAnalysis({ jobId }).pipe(timeout(DEADLINE_MS)))).found;
+  }
+
+  startExperiment(request: StartExperimentRequest): Promise<StartAnalysisResult> {
+    return firstValueFrom(this.service.startExperiment(request).pipe(timeout(DEADLINE_MS)));
   }
 
   async getAnalysisStatus(jobId: string): Promise<AnalysisState> {

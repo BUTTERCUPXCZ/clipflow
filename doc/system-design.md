@@ -279,15 +279,23 @@ The actual schema should also support word-level timestamps when available.
 
 Store the transcription as part of the analysis result.
 
+Phase 4 implementation: faster-whisper `small` on CPU with int8 (`TRANSCRIPTION_MODEL`, `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`), so the GPU stays free for the vision model. `word_timestamps` and `vad_filter` are on. The worker writes `transcript.json` (`{language, durationSeconds, segments:[{start, end, text, words:[{start, end, word, probability}]}]}`) next to the job's audio. A video without audio skips this stage.
+
 ## 4.6 Step 6 — Visual Analysis
 
 Use Qwen3-VL through Ollama.
 
-Initial experiment:
+Default model: Qwen3-VL 4B Instruct (`VISION_MODEL`). 8B was the first choice, but on the 6 GB GPU + 16 GB RAM target it ran 58 % on the CPU, filled RAM and swap, and needed about 8 min per batch of 4 frames once the system started swapping. 4B fits on the GPU. 8B and other models stay available through the in-app experiments (§10).
 
-- Qwen3-VL 8B Instruct.
-- Qwen3-VL 4B fallback.
-- Qwen3-VL 2B as an additional lightweight candidate.
+Phase 4 implementation (`apps/ai-service/app/analysis/`):
+
+- Frame budget: at most `VISION_MAX_FRAMES` (60) frames, spread evenly over the video and always including the first and the last.
+- Batches of `VISION_BATCH_SIZE` (2) frames per Ollama request. Each image is labelled with its timestamp in the prompt. Measured with 4B on the 6 GB GPU: 2 frames per request took 6.7 s/frame, 4 frames took 12.0 s/frame.
+- `num_ctx` is sized per request (about 1,100 tokens per image, because Ollama resizes every image to a fixed size, plus the prompt and the answer). Ollama's default 4,096 is too small for 4 frames, and a larger fixed context costs VRAM and pushes layers to the CPU.
+- The answer is constrained with the JSON schema in `schemas.py` (passed as Ollama `format`), with length caps and `num_predict` = 250 tokens per frame (180 cut answers off), because unbounded 8B output took minutes per frame on 6 GB VRAM.
+- Validation: the schema, plus every scene timestamp must belong to the batch. An invalid batch is retried once with the error. If it is still invalid, it is kept with its raw output (up to 4,000 characters) and marked invalid.
+- The job fails with `VISION_INVALID` only if no batch is valid. A missing runtime or model fails with `MODEL_RUNTIME_UNAVAILABLE` / `MODEL_NOT_INSTALLED` (the message names the `ollama pull` command).
+- Output: `visual.json` with `{model, promptVersion, frames, scenes, batches, metrics}`. Field names are camelCase (`timestampSeconds`, `cameraFraming`, `verticalCropSuitable`, `observations`). The JSON example below shows the original idea.
 
 The system sends sampled frames with timestamps to the model.
 
@@ -616,7 +624,8 @@ Base path:
 | GET | `/videos/:id/jobs` | List video jobs (newest first) |
 | GET | `/jobs/:id/frames` | Frame index of a completed job: `[{index, timestampSeconds}]` |
 | GET | `/jobs/:id/frames/:index` | One frame, `image/jpeg` |
-| WS | `/ws` | Server → desktop `job.updated` events (Origin-checked) |
+| GET | `/videos/:id/analysis` | Transcript + visual analysis of the latest completed job |
+| WS | `/ws` | Server → desktop `job.updated` and `experiment.updated` events (Origin-checked) |
 
 ## 6.4 Generated Clips
 
@@ -631,12 +640,15 @@ Base path:
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/experiments/models` | List configured/available models |
-| POST | `/experiments` | Create experiment |
+| GET | `/experiments/models` | Installed Ollama models that accept images, default marked |
+| POST | `/experiments` | `{videoId, model, batchSize?, maxFrames?}` → 202, queued |
 | GET | `/experiments/:id` | Get experiment |
-| GET | `/videos/:id/experiments` | List experiments |
+| POST | `/experiments/:id/cancel` | Cancel experiment |
+| GET | `/videos/:id/experiments` | List experiments (newest first) |
 
 The experiment API must use the same model execution and frame extraction components as the production workflow.
+
+Phase 4: an experiment reuses the latest completed job's frames and the same `VisualAnalyzer`, on the same RQ queue (one GPU job at a time). It writes to `<job artifacts>/experiments/<id>/visual.json`. Events go through `ReportExperiment{Progress,Completion,Failure}` with the same guarded-update and `stop` rules as jobs.
 
 ---
 
@@ -897,6 +909,8 @@ The first in-app experiment should answer a practical question:
 
 All candidates must be tested with identical inputs.
 
+Phase 4 measured `qwen3-vl:8b-instruct` (6.3 GB) on the 6 GB RTX 4050: it runs split 49 % CPU / 51 % GPU, and unbounded output took 448 s for one frame. Experiments therefore also compare **settings** of one model (frames per request, frame budget), not only models. Recorded metrics: `loadMs`, `inferenceMs`, `totalMs`, `peakVramMiB` (nvidia-smi, sampled every 0.5 s; null when unavailable), `framesAnalysed`, `validBatches`, `totalBatches`. The quality metrics below are scored by hand with the eval sheet (`apps/ai-service/evals/`).
+
 ## 10.2 Experiment Inputs
 
 - Same source video.
@@ -1121,8 +1135,14 @@ The application must not assume that multiple models can be loaded simultaneousl
 Keep model settings configurable:
 
 ```text
-VISION_MODEL=qwen3-vl:8b-instruct
+VISION_MODEL=qwen3-vl:4b-instruct
 TRANSCRIPTION_MODEL=small
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+VISION_MAX_FRAMES=60
+VISION_BATCH_SIZE=2
+VISION_REQUEST_TIMEOUT=300
+OLLAMA_KEEP_ALIVE=5m
 OLLAMA_BASE_URL=http://localhost:11434
 REDIS_URL=redis://localhost:6379/0
 MEDIA_ROOT=~/.local/share/clipforge/media

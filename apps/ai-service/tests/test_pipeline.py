@@ -4,11 +4,14 @@ import threading
 
 import pytest
 
+from app.analysis.ollama_vision import ModelNotInstalled, ModelRuntimeUnavailable
+from app.analysis.transcriber import TranscriptionError
 from app.jobs.pipeline import JobRequest, ProcessingPipeline, ProgressReporter
 from app.media.extractors import AudioExtractor, FrameExtractor
 from app.media.ffmpeg_runner import FfmpegRunner
 from app.media.media_paths import MediaPaths
 from app.media.prober import MediaProber
+from tests.fakes import FakeAnalyzer, FakeTranscriber
 from tests.media_fixtures import videos  # noqa: F401  (pytest fixture)
 
 
@@ -37,15 +40,19 @@ def media(tmp_path, videos):
     return root
 
 
-def pipeline(root, events, cancel=lambda job_id: False):
+def pipeline(root, events, cancel=lambda job_id: False, transcriber=None, analyzer=None):
     runner = FfmpegRunner(poll_interval=0.05, kill_grace=2)
     return ProcessingPipeline(
-        MediaPaths(root), MediaProber(runner), AudioExtractor(runner), FrameExtractor(runner), events, cancel
+        MediaPaths(root), MediaProber(runner), AudioExtractor(runner), FrameExtractor(runner),
+        transcriber or FakeTranscriber(), analyzer or FakeAnalyzer(), events, cancel,
     )
 
 
-def request(name: str) -> JobRequest:
-    return JobRequest(job_id="j1", storage_path=f"src/{name}.mp4", artifacts_path="analysis/j1", interval=1.0, max_width=768)
+def request(name: str, max_frames: int = 60) -> JobRequest:
+    return JobRequest(
+        job_id="j1", storage_path=f"src/{name}.mp4", artifacts_path="analysis/j1", interval=1.0, max_width=768,
+        model="qwen3-vl:8b-instruct", max_frames=max_frames, batch_size=4,
+    )
 
 
 def test_completes_with_audio_and_frames(media):
@@ -60,8 +67,12 @@ def test_completes_with_audio_and_frames(media):
     assert events.completion["audio_path"] == "analysis/j1/audio.wav"
     frames = json.loads((media / events.completion["frames_path"] / "frames.json").read_text())
     assert len(frames) == 3
-    statuses = [s for s, _ in events.progress_events]
-    assert statuses[0] == "VALIDATING" and statuses[-1] == "EXTRACTING_MEDIA"
+    statuses = list(dict.fromkeys(s for s, _ in events.progress_events))
+    assert statuses == ["VALIDATING", "EXTRACTING_MEDIA", "TRANSCRIBING", "ANALYZING_VISUALS"]
+    assert events.completion["transcript_path"] == "analysis/j1/transcript.json"
+    assert events.completion["visual_path"] == "analysis/j1/visual.json"
+    assert (events.completion["valid_batches"], events.completion["total_batches"]) == (1, 1)
+    assert json.loads((media / "analysis/j1/visual.json").read_text())["model"] == "qwen3-vl:8b-instruct"
     percents = [p for s, p in events.progress_events if s == "EXTRACTING_MEDIA"]
     assert percents == sorted(percents)
 
@@ -108,7 +119,7 @@ def test_cancel_during_extraction_stops_and_removes_partial_files(media):
 def test_paths_escaping_media_root_fail_as_internal(media):
     events = RecordingEvents()
 
-    pipeline(media, events).run(JobRequest("j1", "../outside.mp4", "analysis/j1", 1.0, 768))
+    pipeline(media, events).run(JobRequest("j1", "../outside.mp4", "analysis/j1", 1.0, 768, "m", 60, 4))
 
     assert events.failure[0] == "INTERNAL"
 
@@ -159,7 +170,43 @@ def test_refused_completion_leaves_no_files(media):
 def test_refuses_to_use_media_root_itself_as_artifacts(media):
     events = RecordingEvents()
 
-    pipeline(media, events).run(JobRequest("j1", "src/good.mp4", ".", 1.0, 768))
+    pipeline(media, events).run(JobRequest("j1", "src/good.mp4", ".", 1.0, 768, "m", 60, 4))
 
     assert events.failure[0] == "INTERNAL"
     assert (media / "src" / "good.mp4").exists()
+
+
+def test_video_without_audio_skips_transcription(media):
+    events, transcriber = RecordingEvents(), FakeTranscriber()
+
+    pipeline(media, events, transcriber=transcriber).run(request("silent"))
+
+    assert transcriber.calls == 0
+    assert events.completion["transcript_path"] == ""
+    assert "TRANSCRIBING" not in [s for s, _ in events.progress_events]
+
+
+def test_frame_budget_limits_what_the_model_sees(media):
+    events, analyzer = RecordingEvents(), FakeAnalyzer()
+
+    pipeline(media, events, analyzer=analyzer).run(request("good", max_frames=2))
+
+    assert [f["timestampSeconds"] for f in analyzer.frames_seen] == [0.0, 2.0]
+
+
+@pytest.mark.parametrize(
+    ("analyzer", "transcriber", "code", "text"),
+    [
+        (FakeAnalyzer(valid=False), None, "VISION_INVALID", "no valid analysis"),
+        (FakeAnalyzer(error=ModelNotInstalled("qwen3-vl:8b-instruct")), None, "MODEL_NOT_INSTALLED", "ollama pull"),
+        (FakeAnalyzer(error=ModelRuntimeUnavailable("Ollama is not running.")), None, "MODEL_RUNTIME_UNAVAILABLE", "not running"),
+        (None, FakeTranscriber(error=TranscriptionError("boom")), "TRANSCRIPTION_FAILED", "boom"),
+    ],
+)
+def test_ai_failures_are_reported_and_leave_no_files(media, analyzer, transcriber, code, text):
+    events = RecordingEvents()
+
+    pipeline(media, events, analyzer=analyzer, transcriber=transcriber).run(request("good"))
+
+    assert events.failure[0] == code and text in events.failure[1]
+    assert not (media / "analysis/j1").exists()

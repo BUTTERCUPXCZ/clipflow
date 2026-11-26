@@ -9,11 +9,15 @@ import { sourceVideos, type VideoStatus } from '../src/infrastructure/database/s
 import type {
   AnalysisRunner,
   AnalysisState,
+  ModelInfo,
+  ModelStatus,
   StartAnalysisRequest,
   StartAnalysisResult,
+  StartExperimentRequest,
 } from '../src/infrastructure/grpc/ai-service.client.js';
 import { MediaStorage } from '../src/infrastructure/storage/media-storage.js';
 import type { EventsGateway } from '../src/modules/jobs/events.gateway.js';
+import { AnalysesRepository } from '../src/modules/jobs/analyses.repository.js';
 import { JobEventsHandler } from '../src/modules/jobs/job-events.handler.js';
 import { type Job, JobsRepository } from '../src/modules/jobs/jobs.repository.js';
 import { JobsService } from '../src/modules/jobs/jobs.service.js';
@@ -38,6 +42,25 @@ export class FakeRunner implements AnalysisRunner {
     return Promise.resolve(true);
   }
 
+  experiments: StartExperimentRequest[] = [];
+  models: ModelInfo[] = [{ name: 'qwen3-vl:8b-instruct', sizeBytes: 6e9, vision: true }, { name: 'gemma3:1b', sizeBytes: 8e8, vision: false }];
+
+  startExperiment(request: StartExperimentRequest): Promise<StartAnalysisResult> {
+    this.experiments.push(request);
+    return this.startResult instanceof Error ? Promise.reject(this.startResult) : Promise.resolve(this.startResult);
+  }
+
+  getModelStatus(): Promise<ModelStatus> {
+    return Promise.resolve({
+      runtimeReachable: true,
+      installedModels: this.models,
+      configuredVisionModel: 'qwen3-vl:8b-instruct',
+      configuredVisionModelInstalled: true,
+      errorCode: 'ERROR_CODE_UNSPECIFIED',
+      workerRunning: true,
+    });
+  }
+
   getAnalysisStatus(): Promise<AnalysisState> {
     return this.state instanceof Error ? Promise.reject(this.state) : Promise.resolve(this.state);
   }
@@ -47,18 +70,28 @@ export class FakeRunner implements AnalysisRunner {
 export class RecordingGateway {
   pushed: Job[] = [];
 
+  experiments: { status: string }[] = [];
+
   jobUpdated(job: Job): void {
     this.pushed.push(job);
   }
+
+  experimentUpdated(experiment: { status: string }): void {
+    this.experiments.push(experiment);
+  }
 }
 
-const config = { get: (key: keyof Env) => ({ FRAME_SAMPLE_INTERVAL: 1, FRAME_MAX_WIDTH: 768 })[key as string] };
+const config = {
+  get: (key: keyof Env) =>
+    ({ FRAME_SAMPLE_INTERVAL: 1, FRAME_MAX_WIDTH: 768, VISION_MAX_FRAMES: 60, VISION_BATCH_SIZE: 4 })[key as string],
+};
 
 export class JobsHarness {
   readonly database = new TestDatabase();
   readonly jobs = new JobsRepository(this.database.db);
   readonly videos = new VideosRepository(this.database.db);
   readonly projects = new ProjectsRepository(this.database.db);
+  readonly analyses = new AnalysesRepository(this.database.db);
   runner = new FakeRunner();
   gateway = new RecordingGateway();
   storage!: MediaStorage;
@@ -84,11 +117,12 @@ export class JobsHarness {
       this.runner,
       this.gateway as unknown as EventsGateway,
       config as unknown as ConfigService<Env, true>,
+      this.analyses,
     );
   }
 
   handler(): JobEventsHandler {
-    return new JobEventsHandler(this.jobs, this.gateway as unknown as EventsGateway);
+    return new JobEventsHandler(this.jobs, this.gateway as unknown as EventsGateway, this.analyses, this.storage);
   }
 
   /** A video row in the given status (READY by default), owned by `userId`. */

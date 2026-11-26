@@ -30,6 +30,12 @@ class FakeQueue:
     def state(self, job_id: str) -> str:
         return "RUNNING" if job_id == "known" else "UNKNOWN"
 
+    def enqueue_experiment(self, *args) -> None:
+        self.enqueued.append(("experiment", *args))
+
+    def workers_running(self) -> bool:
+        return True
+
 
 @pytest.fixture
 def media_root(tmp_path, videos):
@@ -62,7 +68,8 @@ async def test_reports_installed_models():
 
     assert response.runtime_reachable
     assert response.configured_vision_model_installed
-    assert [m.name for m in response.installed_models] == [VISION_MODEL, "gemma3:1b"]
+    assert [(m.name, m.vision) for m in response.installed_models] == [(VISION_MODEL, True), ("gemma3:1b", False)]
+    assert response.worker_running
 
 
 async def test_unreachable_runtime_is_a_response_not_an_rpc_error():
@@ -125,3 +132,15 @@ async def test_cancel_and_status_delegate_to_the_queue():
     assert not (await call("CancelAnalysis", pb2.CancelAnalysisRequest(job_id="other"))).found
     state = (await call("GetAnalysisStatus", pb2.GetAnalysisStatusRequest(job_id="known"))).state
     assert state == pb2.ANALYSIS_STATE_RUNNING
+
+
+async def test_start_experiment_enqueues_on_the_same_queue(media_root):
+    queue = FakeQueue()
+    request = pb2.StartExperimentRequest(
+        experiment_id="e1", frames_path="analysis/j1/frames", output_path="analysis/experiments/e1", model="m"
+    )
+
+    response = await call("StartExperiment", request, queue=queue, media_root=media_root)
+
+    assert response.accepted
+    assert queue.enqueued == [("experiment", "e1", "analysis/j1/frames", "analysis/experiments/e1", "m", 60, 4)]

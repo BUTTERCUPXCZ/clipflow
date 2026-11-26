@@ -13,6 +13,7 @@ export interface HealthReport {
     ai_service: Check;
     model_runtime: Check;
     vision_model: Check;
+    worker: Check;
   };
 }
 

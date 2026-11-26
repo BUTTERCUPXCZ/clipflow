@@ -41,7 +41,12 @@ describe("ImportButton", () => {
     renderWithProviders(<ImportButton projectId="p1" />);
     fireEvent.click(await screen.findByRole("button", { name: /import videos/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent('notes.txt: Unsupported file type ".txt"');
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("A file could not be imported");
+    expect(dialog).toHaveTextContent('notes.txt: Unsupported file type ".txt"');
     expect(imported).toEqual(["/media/a.mp4", "/media/b.mov"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 });

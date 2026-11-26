@@ -13,7 +13,13 @@ import {
 export type Job = Omit<ProcessingJobRow, 'userId' | 'lastSequence'>;
 export type ActiveStatus = Exclude<JobStatus, 'COMPLETED' | 'FAILED' | 'CANCELLED'>;
 
-export const ACTIVE_JOB_STATUSES: readonly ActiveStatus[] = ['PENDING', 'VALIDATING', 'EXTRACTING_MEDIA'];
+export const ACTIVE_JOB_STATUSES: readonly ActiveStatus[] = [
+  'PENDING',
+  'VALIDATING',
+  'EXTRACTING_MEDIA',
+  'TRANSCRIBING',
+  'ANALYZING_VISUALS',
+];
 
 export function toJob(row: ProcessingJobRow): Job {
   const { userId: _userId, lastSequence: _lastSequence, ...job } = row;
@@ -113,6 +119,16 @@ export class JobsRepository {
       .set({ ...outcome, stage: outcome.status === 'CANCELLED' ? 'Cancelled' : 'Failed', completedAt: sql`now()`, updatedAt: sql`now()` })
       .where(and(eq(processingJobs.id, id), notInArray(processingJobs.status, [...TERMINAL_JOB_STATUSES])))
       .returning();
+    return row;
+  }
+
+  /** The job if this exact completion event was already applied: a worker retry (e.g. after an ack timeout). */
+  async completedWith(id: string, sequence: number): Promise<ProcessingJobRow | undefined> {
+    const [row] = await this.db
+      .select()
+      .from(processingJobs)
+      .where(and(eq(processingJobs.id, id), eq(processingJobs.status, 'COMPLETED'), eq(processingJobs.lastSequence, sequence)))
+      .limit(1);
     return row;
   }
 

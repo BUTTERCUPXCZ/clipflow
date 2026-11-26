@@ -1,6 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AnalysisCard } from "@/features/analysis/components/analysis-card";
+import { ExperimentsPanel } from "@/features/experiments/components/experiments-panel";
 import { JobStatusLine, ProcessingCard } from "@/features/jobs/components/processing-card";
 import { ResultsCard } from "@/features/jobs/components/results-card";
 import { useVideoJobs } from "@/features/jobs/queries";
@@ -50,6 +52,8 @@ export function VideoPage({ projectId, videoId }: { projectId: string; videoId: 
       <MetadataCard video={video.data} />
       <ProcessingCard video={video.data} latest={latest} />
       {completed && <ResultsCard job={completed} />}
+      {completed && <AnalysisCard videoId={videoId} />}
+      <ExperimentsPanel videoId={videoId} canRun={completed !== undefined} />
       {jobs.data && jobs.data.length > 1 && (
         <Card>
           <CardHeader>

@@ -31,6 +31,11 @@ export class JobsController {
     return this.jobs.listForVideo(userId, videoId);
   }
 
+  @Get('videos/:id/analysis')
+  analysis(@CurrentUser() userId: string, @Param('id', { schema: uuidParam }) videoId: string) {
+    return this.jobs.analysis(userId, videoId);
+  }
+
   @Get('jobs/:id')
   get(@CurrentUser() userId: string, @Param('id', { schema: uuidParam }) id: string) {
     return this.jobs.get(userId, id);

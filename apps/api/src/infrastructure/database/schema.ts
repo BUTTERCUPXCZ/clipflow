@@ -78,7 +78,17 @@ export const sourceVideos = pgTable(
   ],
 );
 
-export const JOB_STATUSES = ['PENDING', 'VALIDATING', 'EXTRACTING_MEDIA', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;
+export const JOB_STATUSES = [
+  'PENDING',
+  'VALIDATING',
+  'EXTRACTING_MEDIA',
+  'TRANSCRIBING',
+  'ANALYZING_VISUALS',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+] as const;
+const ACTIVE_JOB_SQL = sql.raw("('PENDING', 'VALIDATING', 'EXTRACTING_MEDIA', 'TRANSCRIBING', 'ANALYZING_VISUALS')");
 export type JobStatus = (typeof JOB_STATUSES)[number];
 export const TERMINAL_JOB_STATUSES: readonly JobStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -90,6 +100,10 @@ export interface JobArtifacts {
   frameCount: number;
   frameIntervalSeconds: number;
   framesPath: string;
+  transcriptPath: string | null;
+  visualPath: string;
+  validBatches: number;
+  totalBatches: number;
 }
 
 export const processingJobs = pgTable(
@@ -123,16 +137,90 @@ export const processingJobs = pgTable(
     // At most one active job per video, enforced by the database (two concurrent POST /process calls).
     uniqueIndex('processing_jobs_one_active_per_video')
       .on(t.sourceVideoId)
-      .where(sql`status in ('PENDING', 'VALIDATING', 'EXTRACTING_MEDIA')`),
+      .where(sql`status in ${ACTIVE_JOB_SQL}`),
     check(
       'processing_jobs_status_check',
-      sql`${t.status} in ('PENDING', 'VALIDATING', 'EXTRACTING_MEDIA', 'COMPLETED', 'FAILED', 'CANCELLED')`,
+      sql`${t.status} in ('PENDING', 'VALIDATING', 'EXTRACTING_MEDIA', 'TRANSCRIBING', 'ANALYZING_VISUALS', 'COMPLETED', 'FAILED', 'CANCELLED')`,
     ),
     check('processing_jobs_progress_check', sql`${t.progress} between 0 and 100`),
   ],
 );
 
 export type ProcessingJobRow = typeof processingJobs.$inferSelect;
+
+/** What a completed job understood about its video (Phase 4). One row per completed job. */
+export const videoAnalyses = pgTable(
+  'video_analyses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceVideoId: uuid('source_video_id')
+      .notNull()
+      .references(() => sourceVideos.id, { onDelete: 'cascade' }),
+    processingJobId: uuid('processing_job_id')
+      .notNull()
+      .unique()
+      .references(() => processingJobs.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    transcript: jsonb('transcript'), // null when the video has no audio
+    visualAnalysis: jsonb('visual_analysis').notNull(),
+    modelMetadata: jsonb('model_metadata').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('video_analyses_source_video_id_idx').on(t.sourceVideoId)],
+);
+
+export const EXPERIMENT_STATUSES = ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;
+export type ExperimentStatus = (typeof EXPERIMENT_STATUSES)[number];
+
+export interface ExperimentMetrics {
+  loadMs: number;
+  inferenceMs: number;
+  totalMs: number;
+  peakVramMiB: number | null;
+  framesAnalysed: number;
+  validBatches: number;
+  totalBatches: number;
+}
+
+/** A visual-analysis run with a chosen model on a completed job's frames (system-design §10). */
+export const experiments = pgTable(
+  'experiments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceVideoId: uuid('source_video_id')
+      .notNull()
+      .references(() => sourceVideos.id, { onDelete: 'cascade' }),
+    processingJobId: uuid('processing_job_id')
+      .notNull()
+      .references(() => processingJobs.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    modelName: text('model_name').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    settings: jsonb('settings').$type<{ maxFrames: number; batchSize: number }>().notNull(),
+    status: text('status', { enum: EXPERIMENT_STATUSES }).notNull(),
+    progress: integer('progress').notNull().default(0),
+    outputPath: text('output_path'),
+    output: jsonb('output'),
+    metrics: jsonb('metrics').$type<ExperimentMetrics>(),
+    lastSequence: integer('last_sequence').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('experiments_source_video_id_idx').on(t.sourceVideoId),
+    check('experiments_status_check', sql`${t.status} in ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')`),
+  ],
+);
+
+export type VideoAnalysisRow = typeof videoAnalyses.$inferSelect;
+export type ExperimentRow = typeof experiments.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type SourceVideoRow = typeof sourceVideos.$inferSelect;
 export type NewSourceVideoRow = typeof sourceVideos.$inferInsert;

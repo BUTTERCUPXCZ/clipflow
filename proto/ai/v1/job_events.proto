@@ -10,12 +10,19 @@ service JobEventsService {
   rpc ReportProgress(ReportProgressRequest) returns (ReportAck);
   rpc ReportCompletion(ReportCompletionRequest) returns (ReportAck);
   rpc ReportFailure(ReportFailureRequest) returns (ReportAck);
+
+  // Model experiments (system-design §10): same sequence and stop semantics as jobs.
+  rpc ReportExperimentProgress(ReportExperimentProgressRequest) returns (ReportAck);
+  rpc ReportExperimentCompletion(ReportExperimentCompletionRequest) returns (ReportAck);
+  rpc ReportExperimentFailure(ReportExperimentFailureRequest) returns (ReportAck);
 }
 
 enum JobStatus {
   JOB_STATUS_UNSPECIFIED = 0;
   JOB_STATUS_VALIDATING = 1;
   JOB_STATUS_EXTRACTING_MEDIA = 2;
+  JOB_STATUS_TRANSCRIBING = 3;
+  JOB_STATUS_ANALYZING_VISUALS = 4;
 }
 
 enum JobErrorCode {
@@ -25,6 +32,10 @@ enum JobErrorCode {
   JOB_ERROR_CODE_INTERRUPTED = 3;
   JOB_ERROR_CODE_CANCELLED = 4;
   JOB_ERROR_CODE_INTERNAL = 5;
+  JOB_ERROR_CODE_MODEL_RUNTIME_UNAVAILABLE = 6;
+  JOB_ERROR_CODE_MODEL_NOT_INSTALLED = 7;
+  JOB_ERROR_CODE_TRANSCRIPTION_FAILED = 8;
+  JOB_ERROR_CODE_VISION_INVALID = 9;  // not one batch of model output passed validation
 }
 
 message ReportProgressRequest {
@@ -43,6 +54,10 @@ message JobArtifacts {
   int32 frame_count = 4;
   double frame_interval_seconds = 5;
   string frames_path = 6; // relative directory holding frame-000001.jpg ... and frames.json
+  string transcript_path = 7;  // relative; empty without audio
+  string visual_path = 8;      // relative visual.json
+  int32 valid_batches = 9;
+  int32 total_batches = 10;
 }
 
 message ReportCompletionRequest {
@@ -63,4 +78,35 @@ message ReportAck {
   // true when the job no longer exists or is already finished/cancelled (e.g. its video was deleted):
   // the worker must stop and clean up. Lets deletes cancel work without coupling modules.
   bool stop = 2;
+}
+
+message ExperimentMetrics {
+  int64 load_ms = 1;
+  int64 inference_ms = 2;
+  int64 total_ms = 3;
+  int32 peak_vram_mib = 4;  // -1 when no NVIDIA GPU was visible
+  int32 frames_analysed = 5;
+  int32 valid_batches = 6;
+  int32 total_batches = 7;
+}
+
+message ReportExperimentProgressRequest {
+  string experiment_id = 1;
+  int64 sequence = 2;
+  int32 progress = 3;
+  string message = 4;
+}
+
+message ReportExperimentCompletionRequest {
+  string experiment_id = 1;
+  int64 sequence = 2;
+  string output_path = 3;  // relative visual.json
+  ExperimentMetrics metrics = 4;
+}
+
+message ReportExperimentFailureRequest {
+  string experiment_id = 1;
+  int64 sequence = 2;
+  JobErrorCode error_code = 3;
+  string error_message = 4;
 }

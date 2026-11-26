@@ -15,6 +15,10 @@ service VideoAnalysisService {
   rpc StartAnalysis(StartAnalysisRequest) returns (StartAnalysisResponse);
   rpc CancelAnalysis(CancelAnalysisRequest) returns (CancelAnalysisResponse);
   rpc GetAnalysisStatus(GetAnalysisStatusRequest) returns (GetAnalysisStatusResponse);
+
+  // Visual analysis of a completed job's frames with any installed vision model (system-design §10).
+  // Cancel and status use CancelAnalysis / GetAnalysisStatus with the experiment id.
+  rpc StartExperiment(StartExperimentRequest) returns (StartAnalysisResponse);
 }
 
 enum ErrorCode {
@@ -30,6 +34,7 @@ message GetModelStatusRequest {}
 message ModelInfo {
   string name = 1;
   int64 size_bytes = 2;
+  bool vision = 3;  // accepts images (Ollama capability "vision")
 }
 
 message GetModelStatusResponse {
@@ -38,6 +43,7 @@ message GetModelStatusResponse {
   string configured_vision_model = 3;
   bool configured_vision_model_installed = 4;
   ErrorCode error_code = 5;
+  bool worker_running = 6;  // at least one RQ processing worker is alive
 }
 
 message ProbeVideoRequest {
@@ -98,4 +104,13 @@ message GetAnalysisStatusRequest {
 
 message GetAnalysisStatusResponse {
   AnalysisState state = 1;
+}
+
+message StartExperimentRequest {
+  string experiment_id = 1;
+  string frames_path = 2;   // a completed job's frames directory (relative)
+  string output_path = 3;   // directory for the experiment's visual.json (relative, under analysis/)
+  string model = 4;
+  int32 max_frames = 5;
+  int32 batch_size = 6;
 }

@@ -1,16 +1,17 @@
 """Durable job queue on Redis + RQ (system-design §13.3). RQ job id == processing job id."""
 
 from redis import Redis
-from rq import Queue
+from rq import Queue, Worker
 from rq.exceptions import NoSuchJobError
 from rq.job import Job, JobStatus
 
 from app.jobs.events import EventSink
 
 QUEUE_NAME = "clipforge-processing"
-JOB_TIMEOUT_SECONDS = 2 * 3600
+JOB_TIMEOUT_SECONDS = 6 * 3600  # a 30+ min video: Whisper on CPU + 60 frames on the 8B model can take over 1 h
 RESULT_TTL_SECONDS = 24 * 3600
 TASK = "app.jobs.task.process_video"
+EXPERIMENT_TASK = "app.jobs.task.run_experiment"
 
 CANCEL_KEY = "clipforge:job-cancel:{job_id}"
 
@@ -57,6 +58,31 @@ class JobQueue:
             failure_ttl=RESULT_TTL_SECONDS,
         )
 
+    def enqueue_experiment(
+        self, experiment_id: str, frames_path: str, output_path: str, model: str, max_frames: int, batch_size: int
+    ) -> None:
+        """Same queue and worker as processing, so an experiment never competes with a job for the GPU."""
+        if self._fetch(experiment_id) is not None:
+            return
+        self._queue.enqueue_call(
+            EXPERIMENT_TASK,
+            kwargs={
+                "experiment_id": experiment_id,
+                "frames_path": frames_path,
+                "output_path": output_path,
+                "model": model,
+                "max_frames": max_frames,
+                "batch_size": batch_size,
+            },
+            job_id=experiment_id,
+            timeout=JOB_TIMEOUT_SECONDS,
+            result_ttl=RESULT_TTL_SECONDS,
+            failure_ttl=RESULT_TTL_SECONDS,
+        )
+
+    def workers_running(self) -> bool:
+        return Worker.count(connection=self._redis) > 0
+
     def cancel(self, job_id: str) -> bool:
         """Queued: dropped and reported CANCELLED here. Running: flagged; the worker stops and reports."""
         job = self._fetch(job_id)
@@ -65,7 +91,10 @@ class JobQueue:
         status = job.get_status(refresh=True)
         if status in (JobStatus.QUEUED, JobStatus.DEFERRED, JobStatus.SCHEDULED):
             job.cancel()
-            self._events.failed(job_id, "CANCELLED", "Cancelled before it started")
+            if job.func_name == EXPERIMENT_TASK:
+                self._events.experiment_failed(job_id, "CANCELLED", "Cancelled before it started")
+            else:
+                self._events.failed(job_id, "CANCELLED", "Cancelled before it started")
         elif status == JobStatus.STARTED:
             self._flags.request(job_id)
         return True

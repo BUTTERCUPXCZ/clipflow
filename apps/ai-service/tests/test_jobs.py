@@ -14,9 +14,11 @@ from rq.registry import StartedJobRegistry
 from app.generated.ai.v1 import job_events_pb2 as pb2
 from app.generated.ai.v1 import job_events_pb2_grpc as pb2_grpc
 from app.jobs.events import JobEventsClient
+from app.jobs import task
 from app.jobs.queue import CancellationFlags, JobQueue
 from app.media.media_paths import MediaPaths
 from app.workers.processing_worker import INTERRUPTED_MESSAGE, recover_interrupted
+from tests.fakes import FakeAnalyzer, FakeTranscriber
 from tests.media_fixtures import videos  # noqa: F401  (pytest fixture)
 
 TEST_REDIS = "redis://localhost:6379/15"
@@ -38,6 +40,9 @@ class FakeNest(pb2_grpc.JobEventsServiceServicer):
 
     def ReportFailure(self, request, context):  # noqa: N802
         return self._record("failure", request)
+
+    def ReportExperimentFailure(self, request, context):  # noqa: N802
+        return self._record("experiment_failure", request)
 
 
 @pytest.fixture
@@ -109,6 +114,17 @@ def test_cancelling_a_queued_job_drops_it_and_reports_cancelled(redis, nest):
     assert queue.cancel("missing") is False
 
 
+def test_cancelling_a_queued_experiment_reports_it_as_an_experiment(redis, nest):
+    queue = JobQueue(redis, CancellationFlags(redis), JobEventsClient(nest.target, redis))
+    queue.enqueue_experiment("e1", "analysis/j1/frames", "analysis/j1/experiments/e1", "m", 60, 4)
+
+    assert queue.state("e1") == "QUEUED"
+    assert queue.cancel("e1") is True
+
+    assert kinds(nest) == ["experiment_failure"]
+    assert nest.events[0][1].experiment_id == "e1"
+
+
 def test_cancelling_a_running_job_sets_its_flag(redis, nest):
     flags = CancellationFlags(redis)
     queue = JobQueue(redis, flags, JobEventsClient(nest.target, redis))
@@ -145,6 +161,9 @@ def test_worker_startup_fails_interrupted_jobs_and_removes_their_files(redis, ne
 
 
 def test_a_real_worker_runs_the_whole_job(redis, nest, tmp_path, videos, monkeypatch):
+    # Real worker, real ffmpeg; the models are faked (tests never download or run Whisper/Ollama).
+    monkeypatch.setattr(task, "Transcriber", lambda *a, **k: FakeTranscriber())
+    monkeypatch.setattr(task, "VisualAnalyzer", lambda *a, **k: FakeAnalyzer())
     (tmp_path / "src").mkdir()
     shutil.copy(videos.with_audio, tmp_path / "src" / "a.mp4")
     monkeypatch.setenv("MEDIA_ROOT", str(tmp_path))

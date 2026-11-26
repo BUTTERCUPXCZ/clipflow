@@ -1,8 +1,22 @@
 import { type ApiClient, api } from "@/lib/api";
 
-export type JobStatus = "PENDING" | "VALIDATING" | "EXTRACTING_MEDIA" | "COMPLETED" | "FAILED" | "CANCELLED";
+export type JobStatus =
+  | "PENDING"
+  | "VALIDATING"
+  | "EXTRACTING_MEDIA"
+  | "TRANSCRIBING"
+  | "ANALYZING_VISUALS"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
 
-export const ACTIVE_STATUSES: readonly JobStatus[] = ["PENDING", "VALIDATING", "EXTRACTING_MEDIA"];
+export const ACTIVE_STATUSES: readonly JobStatus[] = [
+  "PENDING",
+  "VALIDATING",
+  "EXTRACTING_MEDIA",
+  "TRANSCRIBING",
+  "ANALYZING_VISUALS",
+];
 
 export interface JobArtifacts {
   hasAudio: boolean;
@@ -11,6 +25,10 @@ export interface JobArtifacts {
   frameCount: number;
   frameIntervalSeconds: number;
   framesPath: string;
+  transcriptPath: string | null;
+  visualPath: string;
+  validBatches: number;
+  totalBatches: number;
 }
 
 /** Mirrors Job in apps/api/src/modules/jobs/jobs.repository.ts (dates as ISO strings). */

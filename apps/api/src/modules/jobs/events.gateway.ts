@@ -29,6 +29,10 @@ export class EventsGateway {
     this.broadcast('job.updated', job);
   }
 
+  experimentUpdated(experiment: unknown): void {
+    this.broadcast('experiment.updated', experiment);
+  }
+
   private broadcast(event: string, data: unknown): void {
     if (!this.server) return; // not listening (e.g. unit tests)
     const message = JSON.stringify({ event, data });

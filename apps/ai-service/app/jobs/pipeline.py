@@ -1,11 +1,16 @@
-"""Phase 3 processing: VALIDATING → EXTRACTING_MEDIA → COMPLETED (system-design §5.2)."""
+"""Processing: VALIDATING → EXTRACTING_MEDIA → TRANSCRIBING → ANALYZING_VISUALS → COMPLETED (system-design §5.2)."""
 
+import json
 import shutil
 import time
 import wave
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from app.analysis.frame_budget import select_evenly
+from app.analysis.ollama_vision import ModelNotInstalled, ModelRuntimeUnavailable
+from app.analysis.transcriber import TranscriptionError, Transcriber
+from app.analysis.visual_analyzer import VisualAnalyzer
 from app.jobs.events import EventSink
 from app.media.extractors import AudioExtractor, FrameExtractor
 from app.media.ffmpeg_runner import FfmpegCancelled, FfmpegError, scrub
@@ -14,6 +19,8 @@ from app.media.prober import MediaProber
 
 AUDIO_FILE = "audio.wav"
 FRAMES_DIR = "frames"
+TRANSCRIPT_FILE = "transcript.json"
+VISUAL_FILE = "visual.json"
 
 
 @dataclass(frozen=True)
@@ -23,6 +30,9 @@ class JobRequest:
     artifacts_path: str  # output directory, relative to MEDIA_ROOT
     interval: float
     max_width: int
+    model: str
+    max_frames: int
+    batch_size: int
 
 
 class PipelineFailure(Exception):
@@ -59,6 +69,8 @@ class ProcessingPipeline:
         prober: MediaProber,
         audio: AudioExtractor,
         frames: FrameExtractor,
+        transcriber: Transcriber,
+        analyzer: VisualAnalyzer,
         events: EventSink,
         is_cancel_requested: Callable[[str], bool],
     ) -> None:
@@ -66,6 +78,8 @@ class ProcessingPipeline:
         self._prober = prober
         self._audio = audio
         self._frames = frames
+        self._transcriber = transcriber
+        self._analyzer = analyzer
         self._events = events
         self._is_cancel_requested = is_cancel_requested
 
@@ -83,15 +97,24 @@ class ProcessingPipeline:
         except PipelineFailure as failure:
             self._cleanup(artifacts_dir)
             self._events.failed(job.job_id, failure.code, str(failure))
+        except ModelRuntimeUnavailable as exc:
+            self._cleanup(artifacts_dir)
+            self._events.failed(job.job_id, "MODEL_RUNTIME_UNAVAILABLE", str(exc))
+        except ModelNotInstalled as exc:
+            self._cleanup(artifacts_dir)
+            self._events.failed(job.job_id, "MODEL_NOT_INSTALLED", str(exc))
+        except TranscriptionError as exc:
+            self._cleanup(artifacts_dir)
+            self._events.failed(job.job_id, "TRANSCRIPTION_FAILED", scrub(str(exc), self._paths.root))
         except PathEscapeError as exc:
-            self._events.failed(job.job_id, "INTERNAL", str(exc))
+            self._events.failed(job.job_id, "INTERNAL", scrub(str(exc), self._paths.root))
         except FfmpegError as exc:
             self._cleanup(artifacts_dir)
             known = [p for p in (source, artifacts_dir, self._paths.root) if p is not None]
             self._events.failed(job.job_id, "FFMPEG_FAILED", f"FFmpeg failed: {scrub(str(exc), *known)}")
         except Exception as exc:  # noqa: BLE001 — report every unexpected error instead of hanging the job
             self._cleanup(artifacts_dir)
-            self._events.failed(job.job_id, "INTERNAL", f"Unexpected error: {exc}")
+            self._events.failed(job.job_id, "INTERNAL", f"Unexpected error: {scrub(str(exc), self._paths.root)}")
 
     def _process(self, job: JobRequest, source, artifacts_dir) -> None:
         stop = {"requested": False}  # set when NestJS answers a progress event with stop (job deleted)
@@ -113,20 +136,46 @@ class ProcessingPipeline:
         shutil.rmtree(artifacts_dir, ignore_errors=True)  # a re-run starts clean
         artifacts_dir.mkdir(parents=True)
         reporter = ProgressReporter(lambda pct: report("EXTRACTING_MEDIA", "Extracting audio and frames", pct))
-        reporter.report(5, force=True)
+        reporter.report(3, force=True)
 
         audio_path = artifacts_dir / AUDIO_FILE
         if probe.has_audio:
             self._audio.extract(
                 source, audio_path, duration=probe.duration_seconds,
-                on_progress=reporter.band(5, 30), should_cancel=should_cancel,
+                on_progress=reporter.band(3, 8), should_cancel=should_cancel,
             )
         frames = self._frames.extract(
             source, artifacts_dir / FRAMES_DIR, interval=job.interval, max_width=job.max_width,
-            duration=probe.duration_seconds, on_progress=reporter.band(30, 99), should_cancel=should_cancel,
+            duration=probe.duration_seconds, on_progress=reporter.band(8, 20), should_cancel=should_cancel,
         )
 
-        stop = self._events.completed(
+        transcript_path = artifacts_dir / TRANSCRIPT_FILE
+        if probe.has_audio:
+            transcribing = ProgressReporter(lambda pct: report("TRANSCRIBING", "Transcribing speech", pct))
+            transcribing.report(20, force=True)
+            transcript = self._transcriber.transcribe(
+                audio_path, duration=probe.duration_seconds,
+                on_progress=transcribing.band(20, 50), should_cancel=should_cancel,
+            )
+            transcript_path.write_text(json.dumps(transcript))
+
+        analysing = ProgressReporter(lambda pct: report("ANALYZING_VISUALS", "Analysing frames", pct))
+        analysing.report(50, force=True)
+        chosen = select_evenly([_frame_dict(f) for f in frames], job.max_frames)
+        visual = self._analyzer.analyze(
+            artifacts_dir / FRAMES_DIR, chosen, model=job.model, batch_size=job.batch_size,
+            on_progress=analysing.band(50, 99), should_cancel=should_cancel,
+        )
+        metrics = visual["metrics"]
+        if metrics["validBatches"] == 0:
+            raise PipelineFailure(
+                "VISION_INVALID",
+                f"The vision model returned no valid analysis ({metrics['totalBatches']} batches tried)",
+            )
+        visual_path = artifacts_dir / VISUAL_FILE
+        visual_path.write_text(json.dumps(visual))
+
+        refused = self._events.completed(
             job.job_id,
             {
                 "has_audio": probe.has_audio,
@@ -135,9 +184,13 @@ class ProcessingPipeline:
                 "frame_count": len(frames),
                 "frame_interval_seconds": job.interval,
                 "frames_path": self._paths.relative(artifacts_dir / FRAMES_DIR),
+                "transcript_path": self._paths.relative(transcript_path) if probe.has_audio else "",
+                "visual_path": self._paths.relative(visual_path),
+                "valid_batches": metrics["validBatches"],
+                "total_batches": metrics["totalBatches"],
             },
         )
-        if stop:  # cancelled or deleted after our last check: the completion was refused, keep nothing
+        if refused:  # cancelled or deleted after our last check: the completion was refused, keep nothing
             self._cleanup(artifacts_dir)
 
     @staticmethod
@@ -149,3 +202,7 @@ class ProcessingPipeline:
 def _wav_duration(path) -> float:
     with wave.open(str(path)) as wav:
         return round(wav.getnframes() / wav.getframerate(), 3)
+
+
+def _frame_dict(frame) -> dict:
+    return {"index": frame.index, "file": frame.file, "timestampSeconds": frame.timestamp_seconds}

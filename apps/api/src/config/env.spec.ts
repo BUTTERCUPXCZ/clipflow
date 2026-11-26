@@ -14,6 +14,8 @@ describe('validateEnv', () => {
       JOB_EVENTS_GRPC_URL: 'localhost:50052',
       FRAME_SAMPLE_INTERVAL: 1,
       FRAME_MAX_WIDTH: 768,
+      VISION_MAX_FRAMES: 60,
+      VISION_BATCH_SIZE: 2,
     });
   });
 

@@ -17,6 +17,7 @@ export class AiServiceHealthIndicator implements HealthIndicator {
         ai_service: error(`unreachable: ${errorMessage(e)}`),
         model_runtime: unknown,
         vision_model: unknown,
+        worker: unknown,
       };
     }
 
@@ -26,6 +27,9 @@ export class AiServiceHealthIndicator implements HealthIndicator {
         ? ok(`Ollama reachable, ${status.installedModels.length} models installed`)
         : error('Ollama unreachable'),
       vision_model: visionModelCheck(status),
+      worker: status.workerRunning
+        ? ok('processing worker running')
+        : error('no processing worker is running: start it with npm run dev:ai'),
     };
   }
 }

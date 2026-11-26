@@ -33,6 +33,7 @@ describe("SystemStatus", () => {
         ai_service: ok("connected"),
         model_runtime: ok("Ollama reachable, 3 models installed"),
         vision_model: ok("qwen3-vl:8b-instruct"),
+        worker: ok("processing worker running"),
       },
     };
     mockFetch(async () => Response.json(report));
@@ -40,7 +41,7 @@ describe("SystemStatus", () => {
     renderStatus();
 
     expect(await screen.findByText("qwen3-vl:8b-instruct")).toBeInTheDocument();
-    expect(screen.getAllByText("OK")).toHaveLength(5);
+    expect(screen.getAllByText("OK")).toHaveLength(6);
     expect(screen.queryByText("Error")).not.toBeInTheDocument();
   });
 
@@ -52,6 +53,7 @@ describe("SystemStatus", () => {
         ai_service: ok("connected"),
         model_runtime: ok("Ollama reachable, 3 models installed"),
         vision_model: ok("qwen3-vl:8b-instruct"),
+        worker: ok("processing worker running"),
       },
     };
     mockFetch(async () => Response.json(report, { status: 503 }));
@@ -69,7 +71,7 @@ describe("SystemStatus", () => {
     renderStatus();
 
     expect(await screen.findByText("Unexpected health response: HTTP 404")).toBeInTheDocument();
-    expect(screen.getAllByText("unknown: health check failed")).toHaveLength(4);
+    expect(screen.getAllByText("unknown: health check failed")).toHaveLength(5);
   });
 
   it("stops showing the previous OK rows when a refresh fails", async () => {
@@ -80,6 +82,7 @@ describe("SystemStatus", () => {
         ai_service: ok("connected"),
         model_runtime: ok("Ollama reachable, 3 models installed"),
         vision_model: ok("qwen3-vl:8b-instruct"),
+        worker: ok("processing worker running"),
       },
     };
     const fetchMock = vi
@@ -92,7 +95,7 @@ describe("SystemStatus", () => {
     await screen.findByText("qwen3-vl:8b-instruct");
     fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
 
-    expect(await screen.findAllByText("unknown: API unreachable")).toHaveLength(4);
+    expect(await screen.findAllByText("unknown: API unreachable")).toHaveLength(5);
     expect(screen.queryByText("OK")).not.toBeInTheDocument();
   });
 
@@ -103,6 +106,6 @@ describe("SystemStatus", () => {
 
     expect(await screen.findByText(/API unreachable at/)).toBeInTheDocument();
     expect(within(row("NestJS API")).getByText("Error")).toBeInTheDocument();
-    expect(screen.getAllByText("unknown: API unreachable")).toHaveLength(4);
+    expect(screen.getAllByText("unknown: API unreachable")).toHaveLength(5);
   });
 });

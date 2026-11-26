@@ -59,4 +59,4 @@ def test_app_registers_every_dependency_check(settings):
     with TestClient(create_app(settings)) as client:
         names = {type(c).__name__ for c in client.app.state.health._checks}
 
-    assert names == {"ModelRuntimeCheck", "RedisCheck", "FfmpegCheck", "MediaRootCheck"}
+    assert names == {"ModelRuntimeCheck", "RedisCheck", "WorkerCheck", "FfmpegCheck", "MediaRootCheck"}

@@ -111,6 +111,10 @@ describe('JobsService (clipforge_test)', () => {
       frameCount: 3,
       frameIntervalSeconds: 1,
       framesPath,
+      transcriptPath: null,
+      visualPath: 'x/visual.json',
+      validBatches: 1,
+      totalBatches: 1,
     });
 
     expect(await service.frames(LOCAL_USER_ID, job.id)).toEqual([

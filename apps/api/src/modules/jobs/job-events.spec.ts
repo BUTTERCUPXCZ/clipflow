@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { JobsHarness } from '../../../test/jobs-harness.js';
 import { LOCAL_USER_ID } from '../../common/current-user.js';
@@ -66,20 +68,63 @@ describe('JobEventsHandler and JobsReconciler (clipforge_test)', () => {
     expect(await h.handler().progress(progress(randomUUID(), 1, 1))).toEqual({ applied: false, stop: true });
   });
 
-  it('stores the artifacts of a completed job', async () => {
-    const { id } = await job();
+  const artifacts = (overrides = {}) => ({
+    hasAudio: false,
+    audioPath: '',
+    audioDurationSeconds: 0,
+    frameCount: 9,
+    frameIntervalSeconds: 1,
+    framesPath: 'analysis/j/frames',
+    transcriptPath: '',
+    visualPath: 'analysis/j/visual.json',
+    validBatches: 2,
+    totalBatches: 3,
+    ...overrides,
+  });
+  const writeResult = async (path: string, value: unknown) => {
+    await mkdir(dirname(h.storage.absolute(path)), { recursive: true });
+    await writeFile(h.storage.absolute(path), JSON.stringify(value));
+  };
+  const VISUAL = { model: 'qwen3-vl:8b-instruct', promptVersion: 'visual-v1', scenes: [], metrics: { validBatches: 2 } };
 
-    await h.handler().completion({
-      jobId: id,
-      sequence: 4,
-      artifacts: { hasAudio: false, audioPath: '', audioDurationSeconds: 0, frameCount: 9, frameIntervalSeconds: 1, framesPath: 'a/f' },
-    });
+  it('stores the artifacts and the analysis of a completed job', async () => {
+    const { id, sourceVideoId } = await job();
+    await writeResult('analysis/j/visual.json', VISUAL);
+    await writeResult('analysis/j/transcript.json', { language: 'en', segments: [] });
+
+    await h.handler().completion({ jobId: id, sequence: 4, artifacts: artifacts({ transcriptPath: 'analysis/j/transcript.json' }) });
 
     expect(await h.service().get(LOCAL_USER_ID, id)).toMatchObject({
       status: 'COMPLETED',
       progress: 100,
-      artifacts: { hasAudio: false, audioPath: null, audioDurationSeconds: null, frameCount: 9, framesPath: 'a/f' },
+      artifacts: { hasAudio: false, audioPath: null, frameCount: 9, validBatches: 2, totalBatches: 3 },
     });
+    expect(await h.service().analysis(LOCAL_USER_ID, sourceVideoId)).toMatchObject({
+      processingJobId: id,
+      transcript: { language: 'en' },
+      visualAnalysis: VISUAL,
+      modelMetadata: { visionModel: 'qwen3-vl:8b-instruct', promptVersion: 'visual-v1' },
+    });
+  });
+
+  it('fails the job instead of completing it without readable results', async () => {
+    const { id } = await job();
+
+    const ack = await h.handler().completion({ jobId: id, sequence: 4, artifacts: artifacts() });
+
+    expect(ack).toEqual({ applied: true, stop: true }); // the worker removes the failed job's files
+    expect(await h.service().get(LOCAL_USER_ID, id)).toMatchObject({ status: 'FAILED', errorCode: 'INTERNAL' });
+  });
+
+  it('acks a retried completion as applied, so the worker keeps the files', async () => {
+    const { id, sourceVideoId } = await job();
+    await writeResult('analysis/j/visual.json', VISUAL);
+    const event = { jobId: id, sequence: 4, artifacts: artifacts() };
+
+    await h.handler().completion(event);
+    expect(await h.handler().completion(event)).toEqual({ applied: true, stop: false });
+    expect(await h.handler().completion({ ...event, sequence: 3 })).toEqual({ applied: false, stop: true });
+    expect(await h.service().analysis(LOCAL_USER_ID, sourceVideoId)).toMatchObject({ processingJobId: id });
   });
 
   it('records a worker-side cancellation as CANCELLED and other errors as FAILED', async () => {

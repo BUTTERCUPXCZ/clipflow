@@ -7,12 +7,14 @@ import { Progress } from "@/components/ui/progress";
 import { liveEvents } from "@/lib/live-events";
 import type { Video } from "@/features/videos/api";
 import { isActive, type Job } from "../api";
-import { useCancelJob, useConnectionState, useProcessVideo } from "../queries";
+import { useCancelJob, useConnectionState, useProcessVideo, useWorkerMissing } from "../queries";
 
 const STAGE_LABEL: Record<Job["status"], string> = {
   PENDING: "Waiting in the queue",
   VALIDATING: "Checking the video",
   EXTRACTING_MEDIA: "Extracting audio and frames",
+  TRANSCRIBING: "Transcribing speech",
+  ANALYZING_VISUALS: "Analysing frames",
   COMPLETED: "Completed",
   FAILED: "Failed",
   CANCELLED: "Cancelled",
@@ -35,7 +37,9 @@ export function ProcessingCard({ video, latest }: { video: Video; latest: Job | 
     <Card>
       <CardHeader>
         <CardTitle>Processing</CardTitle>
-        <CardDescription>Checks the video, then extracts a speech-ready audio track and one frame per second.</CardDescription>
+        <CardDescription>
+          Extracts audio and frames, transcribes the speech, then describes what is seen with the local vision model.
+        </CardDescription>
         <CardAction>
           {running ? (
             <Button variant="outline" onClick={() => run(() => cancel.mutateAsync(latest.id))} disabled={cancel.isPending}>
@@ -53,6 +57,7 @@ export function ProcessingCard({ video, latest }: { video: Video; latest: Job | 
       <CardContent className="grid gap-3">
         {!latest && <p className="text-muted-foreground text-sm">Not processed yet.</p>}
         {latest && <JobStatusLine job={latest} />}
+        {latest && <NoWorkerHint job={latest} />}
         {running && connection !== "open" && (
           <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
             <WifiOff className="size-3.5" aria-hidden />
@@ -66,6 +71,16 @@ export function ProcessingCard({ video, latest }: { video: Video; latest: Job | 
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Asks the health check, not a timer: a job can wait a long time behind an experiment on the one queue. */
+export function NoWorkerHint({ job }: { job: Job }) {
+  if (!useWorkerMissing(job.status === "PENDING")) return null;
+  return (
+    <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
+      Still waiting. No processing worker seems to be running: start it with <code>npm run dev:ai</code>.
+    </p>
   );
 }
 

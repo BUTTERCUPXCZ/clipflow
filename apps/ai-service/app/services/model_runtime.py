@@ -10,6 +10,7 @@ import httpx
 class InstalledModel:
     name: str
     size_bytes: int
+    vision: bool = False  # Ollama capability "vision": accepts images
 
 
 @dataclass(frozen=True)
@@ -45,4 +46,13 @@ class OllamaRuntime:
             ]
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             return ModelRuntimeStatus(reachable=False, error=str(exc) or type(exc).__name__)
-        return ModelRuntimeStatus(reachable=True, models=models)
+        return ModelRuntimeStatus(reachable=True, models=[await self._with_capabilities(m) for m in models])
+
+    async def _with_capabilities(self, model: InstalledModel) -> InstalledModel:
+        try:
+            response = await self._client.post("/api/show", json={"model": model.name})
+            response.raise_for_status()
+            capabilities = response.json().get("capabilities") or []
+        except (httpx.HTTPError, ValueError):
+            return model  # unknown capabilities: treat as not vision-capable
+        return InstalledModel(model.name, model.size_bytes, vision="vision" in capabilities)

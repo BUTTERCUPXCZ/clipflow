@@ -1,5 +1,6 @@
 """Health checks for the local infrastructure the AI service depends on. One class per dependency."""
 
+import asyncio
 import os
 import shutil
 from collections.abc import Callable
@@ -62,6 +63,22 @@ class FfmpegCheck:
         if missing:
             return {"ffmpeg": error(f"not found on PATH: {', '.join(missing)}")}
         return {"ffmpeg": ok(self._which("ffmpeg") or "ffmpeg")}
+
+
+class WorkerCheck:
+    """Is a processing worker alive? Without one, jobs wait in the queue forever."""
+
+    def __init__(self, workers_running) -> None:
+        self._workers_running = workers_running
+
+    async def run(self) -> dict[str, Check]:
+        try:
+            running = await asyncio.to_thread(self._workers_running)
+        except Exception as exc:  # noqa: BLE001
+            return {"worker": error(f"cannot check workers: {exc}")}
+        if running:
+            return {"worker": ok("processing worker running")}
+        return {"worker": error("no processing worker is running: start it with npm run dev:ai")}
 
 
 class MediaRootCheck:

@@ -14,6 +14,7 @@ const LABELS: Record<CheckKey, string> = {
   ai_service: "AI service (gRPC)",
   model_runtime: "Ollama runtime",
   vision_model: "Vision model",
+  worker: "Processing worker",
 };
 
 /** The slice of a TanStack query result these rows depend on. */

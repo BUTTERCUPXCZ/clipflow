@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -12,6 +14,9 @@ def ollama_client(models: list[str] | None) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         if models is None:
             raise httpx.ConnectError("connection refused", request=request)
+        if request.url.path == "/api/show":
+            name = json.loads(request.content)["model"]
+            return httpx.Response(200, json={"capabilities": ["completion", "vision"] if "vl" in name else ["completion"]})
         assert request.url.path == "/api/tags"
         return httpx.Response(200, json={"models": [{"name": m, "size": 123} for m in models]})
 

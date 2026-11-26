@@ -11,6 +11,10 @@ const ARTIFACTS = {
   frameCount: 3,
   frameIntervalSeconds: 1,
   framesPath: 'analysis/frames',
+  transcriptPath: null,
+  visualPath: 'analysis/visual.json',
+  validBatches: 1,
+  totalBatches: 1,
 };
 
 describe('JobsRepository (clipforge_test)', () => {

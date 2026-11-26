@@ -7,10 +7,11 @@ const MODEL = 'qwen3-vl:8b-instruct';
 
 const modelStatus = (overrides: Partial<ModelStatus> = {}): ModelStatus => ({
   runtimeReachable: true,
-  installedModels: [{ name: MODEL, sizeBytes: 1 }],
+  installedModels: [{ name: MODEL, sizeBytes: 1, vision: true }],
   configuredVisionModel: MODEL,
   configuredVisionModelInstalled: true,
   errorCode: 'ERROR_CODE_UNSPECIFIED',
+  workerRunning: true,
   ...overrides,
 });
 

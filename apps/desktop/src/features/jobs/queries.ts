@@ -1,5 +1,9 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
+import { analysisKey } from "@/features/analysis/queries";
+import { fetchHealth } from "@/features/system/api";
+import type { Experiment } from "@/features/experiments/api";
+import { upsertExperiment } from "@/features/experiments/queries";
 import type { ConnectionState, EventsClient } from "@/lib/events";
 import { type Job, jobsApi } from "./api";
 
@@ -58,10 +62,19 @@ export function useLiveJobUpdates(events: EventsClient): void {
   const queryClient = useQueryClient();
   useEffect(() => {
     const offMessage = events.onMessage((message) => {
-      if (message.event === "job.updated") upsertJob(queryClient, message.data as Job);
+      if (message.event === "job.updated") {
+        const job = message.data as Job;
+        upsertJob(queryClient, job);
+        // A completed job has just stored a new analysis for its video.
+        if (job.status === "COMPLETED") void queryClient.invalidateQueries({ queryKey: analysisKey(job.sourceVideoId) });
+      }
+      if (message.event === "experiment.updated") upsertExperiment(queryClient, message.data as Experiment);
     });
     const offState = events.onState((state) => {
-      if (state === "open") void queryClient.invalidateQueries({ queryKey: jobKeys.all });
+      if (state === "open") {
+        void queryClient.invalidateQueries({ queryKey: jobKeys.all });
+        void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      }
     });
     events.start();
     return () => {
@@ -77,4 +90,10 @@ export function useConnectionState(events: EventsClient): ConnectionState {
     (onChange) => events.onState(onChange),
     () => events.getState(),
   );
+}
+
+/** True when the API health check says no processing worker is running (polled only while `enabled`). */
+export function useWorkerMissing(enabled: boolean): boolean {
+  const health = useQuery({ queryKey: ["system", "health"], queryFn: fetchHealth, enabled, refetchInterval: 5000 });
+  return enabled && health.data?.checks.worker?.status === "error";
 }

@@ -19,6 +19,10 @@ class AnalysisQueue(Protocol):
     def enqueue(self, job_id: str, storage_path: str, artifacts_path: str, interval: float, max_width: int) -> None: ...
     def cancel(self, job_id: str) -> bool: ...
     def state(self, job_id: str) -> str: ...  # "QUEUED" | "RUNNING" | "FINISHED" | "UNKNOWN"
+    def enqueue_experiment(
+        self, experiment_id: str, frames_path: str, output_path: str, model: str, max_frames: int, batch_size: int
+    ) -> None: ...
+    def workers_running(self) -> bool: ...
 
 
 class VideoAnalysisServicer(pb2_grpc.VideoAnalysisServiceServicer):
@@ -42,7 +46,8 @@ class VideoAnalysisServicer(pb2_grpc.VideoAnalysisServiceServicer):
             log.warning("model_runtime_unreachable", error=status.error)
         return pb2.GetModelStatusResponse(
             runtime_reachable=status.reachable,
-            installed_models=[pb2.ModelInfo(name=m.name, size_bytes=m.size_bytes) for m in status.models],
+            installed_models=[pb2.ModelInfo(name=m.name, size_bytes=m.size_bytes, vision=m.vision) for m in status.models],
+            worker_running=await asyncio.to_thread(self._workers_running),
             configured_vision_model=self._vision_model,
             configured_vision_model_installed=status.has_model(self._vision_model),
             error_code=(
@@ -94,6 +99,34 @@ class VideoAnalysisServicer(pb2_grpc.VideoAnalysisServiceServicer):
                 accepted=False, error_code=pb2.ERROR_CODE_QUEUE_UNAVAILABLE, error_message=str(exc)
             )
         return pb2.StartAnalysisResponse(accepted=True)
+
+    async def StartExperiment(self, request, context):  # noqa: N802
+        try:
+            self._paths.resolve_artifacts(request.frames_path)
+            self._paths.resolve_artifacts(request.output_path)
+            await asyncio.to_thread(
+                self._queue.enqueue_experiment,
+                request.experiment_id,
+                request.frames_path,
+                request.output_path,
+                request.model,
+                request.max_frames or 60,
+                request.batch_size or 4,
+            )
+        except PathEscapeError as exc:
+            return pb2.StartAnalysisResponse(accepted=False, error_code=pb2.ERROR_CODE_INVALID_PATH, error_message=str(exc))
+        except Exception as exc:  # Redis down
+            log.error("enqueue_experiment_failed", experiment_id=request.experiment_id, error=str(exc))
+            return pb2.StartAnalysisResponse(
+                accepted=False, error_code=pb2.ERROR_CODE_QUEUE_UNAVAILABLE, error_message=str(exc)
+            )
+        return pb2.StartAnalysisResponse(accepted=True)
+
+    def _workers_running(self) -> bool:
+        try:
+            return self._queue.workers_running()
+        except Exception:  # noqa: BLE001 — Redis down: report no worker rather than failing the status call
+            return False
 
     async def CancelAnalysis(self, request, context):  # noqa: N802
         return pb2.CancelAnalysisResponse(found=await asyncio.to_thread(self._queue.cancel, request.job_id))

@@ -16,6 +16,7 @@ import type { AnalysisRunner } from '../../infrastructure/grpc/ai-service.client
 import { ANALYSIS_RUNNER } from '../../infrastructure/grpc/grpc.module.js';
 import { MediaStorage } from '../../infrastructure/storage/media-storage.js';
 import { VideosRepository } from '../videos/videos.repository.js';
+import { AnalysesRepository } from './analyses.repository.js';
 import { EventsGateway } from './events.gateway.js';
 import { ACTIVE_JOB_STATUSES, type Job, JobsRepository, toJob } from './jobs.repository.js';
 
@@ -41,6 +42,7 @@ export class JobsService {
     @Inject(ANALYSIS_RUNNER) private readonly runner: AnalysisRunner,
     private readonly gateway: EventsGateway,
     private readonly config: ConfigService<Env, true>,
+    private readonly analyses: AnalysesRepository,
   ) {}
 
   /** 202 path: creates the job and hands it to the AI service's queue; the worker does the rest. */
@@ -88,6 +90,15 @@ export class JobsService {
   async listForVideo(userId: string, videoId: string): Promise<Job[]> {
     if (!(await this.videos.findOwned(userId, videoId))) throw new NotFoundException('Video not found');
     return (await this.jobs.listForVideo(userId, videoId)).map(toJob);
+  }
+
+  /** The latest completed job's transcript and visual analysis for a video. */
+  async analysis(userId: string, videoId: string) {
+    if (!(await this.videos.findOwned(userId, videoId))) throw new NotFoundException('Video not found');
+    const row = await this.analyses.latestForVideo(userId, videoId);
+    if (!row) throw new NotFoundException('This video has not been analysed yet');
+    const { userId: _userId, ...analysis } = row;
+    return analysis;
   }
 
   async get(userId: string, id: string): Promise<Job> {

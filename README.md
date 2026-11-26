@@ -6,7 +6,7 @@ ClipForge AI is a desktop app for content creators. You import a long video (a p
 
 Everything runs locally. Speech recognition, visual understanding and rendering all happen on your computer, so you need no cloud account or paid AI API, and your footage never leaves your machine.
 
-> **Status:** Phases 1–3 are complete. You can create projects, import videos (validated, copied, and inspected with FFprobe), and **process** them: a background worker extracts a speech-ready audio track and one frame per second, with live progress over a WebSocket, cancel, and crash recovery. AI analysis and rendering arrive in Phases 4–6. See the [roadmap](#roadmap).
+> **Status:** Phases 1–4 are complete. You can create projects, import videos (validated, copied, and inspected with FFprobe), and **process** them: a background worker extracts audio and frames, transcribes speech with faster-whisper, and describes the frames with a local vision model through Ollama. Progress is live over a WebSocket, with cancel and crash recovery. **Model experiments** rerun the visual analysis with another installed model or setting and compare speed, VRAM and output side by side. The editing planner and rendering arrive in Phases 5–6. See the [roadmap](#roadmap).
 
 ---
 
@@ -89,7 +89,7 @@ clipflow/
 | Tauri Linux deps | webkit2gtk-4.1 etc. | [tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/) |
 | PostgreSQL | 16, local | `pg_lsclusters` |
 | Redis | localhost, `appendonly yes` | `redis-cli config get appendonly` |
-| Ollama | with `qwen3-vl:8b-instruct` | `ollama list` |
+| Ollama | with `qwen3-vl:4b-instruct` | `ollama list` |
 | FFmpeg | ffmpeg + ffprobe on PATH | `ffprobe -version` |
 
 Developed and tested on Ubuntu 24.04 with an RTX 4050 (6 GB VRAM) and 16 GB RAM.
@@ -101,7 +101,7 @@ nvm use
 npm install                                   # desktop + api workspaces
 cd apps/ai-service && uv sync && uv run python scripts/gen_proto.py && cd -
 cp .env.example .env                          # defaults work for a local setup
-ollama pull qwen3-vl:8b-instruct
+ollama pull qwen3-vl:4b-instruct
 ```
 
 One-time database setup. Your OS user gets a matching Postgres role, so it connects over the local socket with no password:
@@ -142,7 +142,7 @@ npm run build         # desktop + api
 | 1 | Application foundation: all services running and talking | ✅ Done |
 | 2 | Projects and video import | ✅ Done |
 | 3 | Media processing: FFprobe, audio and frame extraction, job queue | ✅ Done |
-| 4 | Local AI: transcription and visual analysis, model experiments | Next |
+| 4 | Local AI: transcription and visual analysis, model experiments | ✅ Done |
 | 5 | AI editing planner: highlights, clip boundaries, validated plans | Planned |
 | 6 | Automatic rendering: 9:16, subtitles, thumbnails | Planned |
 | 7 | Complete desktop experience: progress, gallery, preview, export | Planned |
