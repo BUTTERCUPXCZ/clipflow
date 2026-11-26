@@ -1,3 +1,4 @@
+import { StandardSchemaValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
@@ -8,6 +9,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix('api/v1');
+  // Validates every @Body/@Param/@Query that declares a { schema } (zod) — 400 on failure.
+  app.useGlobalPipes(new StandardSchemaValidationPipe());
   app.enableCors({ origin: DESKTOP_ORIGINS });
   app.enableShutdownHooks();
 

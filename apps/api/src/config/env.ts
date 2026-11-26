@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 
@@ -17,6 +18,10 @@ const envSchema = z.object({
     .string({ error: 'DATABASE_URL is required (PostgreSQL connection string)' })
     .regex(/^postgres(ql)?:\/\//, 'DATABASE_URL must start with postgres:// or postgresql://'),
   AI_GRPC_URL: z.string().min(1).default('localhost:50051'),
+  MEDIA_ROOT: z
+    .string({ error: 'MEDIA_ROOT is required (directory for imported and generated media)' })
+    .min(1)
+    .transform((p) => resolve(p.replace(/^~(?=$|\/)/, homedir()))),
 });
 
 export type Env = z.infer<typeof envSchema>;

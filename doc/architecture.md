@@ -55,11 +55,11 @@ The MVP should prove that ClipForge AI can reliably complete the entire workflow
 - Delete projects.
 
 ### Video management
-- Upload source videos.
-- Support multiple uploaded videos per project.
-- Display upload progress.
+- Import source videos (native file picker; files are copied into the media directory).
+- Support multiple imported videos per project.
+- Display import progress.
 - Display video metadata.
-- Delete uploaded videos.
+- Delete imported videos.
 
 ### AI video analysis
 - Extract audio using FFmpeg.
@@ -139,7 +139,8 @@ These can be considered after the application is usable.
 | Database | PostgreSQL 16 (local) |
 | Media storage | Local filesystem (`MEDIA_ROOT`) |
 | Job queue | Redis + RQ |
-| Authentication | To be decided in Phase 2 (see §11) |
+| ORM / migrations | Drizzle ORM + drizzle-kit (SQL migrations, applied at API startup) |
+| Authentication | Single local user, no login (see §11) |
 | Logging | Pino + structlog + Rust tracing |
 | Observability | OpenTelemetry |
 | Version control | Git + GitHub |
@@ -379,7 +380,7 @@ Responsibilities:
 
 - Manage application business logic.
 - Validate requests.
-- Authenticate users (mechanism decided in Phase 2).
+- Resolve the acting user for every request (single local user; see §11).
 - Manage projects and video records.
 - Import source videos into the media directory.
 - Create processing jobs.
@@ -803,15 +804,15 @@ Fields:
 - project_id
 - user_id
 - filename
-- storage_path
+- storage_path (relative to `MEDIA_ROOT`)
 - file_size
+- bytes_copied (import progress)
 - mime_type
-- duration
-- width
-- height
-- frame_rate
-- status
+- status (`IMPORTING`, `READY`, `FAILED`)
+- error_message
+- duration, width, height, frame_rate (filled by FFprobe in Phase 3)
 - created_at
+- updated_at
 
 ### processing_jobs
 
@@ -961,7 +962,7 @@ Use unique identifiers for generated clips and ensure retrying a rendering stage
 
 # 11. Security
 
-- Authentication is an open Phase 2 decision: a single implicit local user (no login), or accounts managed by NestJS. Either way the API binds to localhost only.
+- Authentication: a single implicit local user (no login), seeded by the first migration. Every handler gets the user id from the `@CurrentUser()` decorator (`apps/api/src/common/current-user.ts`) and every repository query filters by it. Adding real accounts later means replacing that decorator's body. The API binds to localhost only.
 - Validate ownership of projects, videos, jobs, and clips.
 - Keep media inside `MEDIA_ROOT` with user-only file permissions.
 - Serve media to the desktop only through authorized NestJS endpoints.

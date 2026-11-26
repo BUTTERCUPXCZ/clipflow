@@ -8,5 +8,8 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    globalSetup: ['./test/global-setup.ts'],
+    // DB suites share clipforge_test; run files one at a time so resets never race.
+    fileParallelism: false,
   },
 });

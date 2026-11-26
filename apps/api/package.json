@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "test:debug": "vitest --inspect-brk --no-file-parallelism"
+    "test:debug": "vitest --inspect-brk --no-file-parallelism",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.7",
@@ -27,6 +28,7 @@
     "@nestjs/core": "^12.0.1",
     "@nestjs/microservices": "^12.6.2",
     "@nestjs/platform-express": "^12.0.1",
+    "drizzle-orm": "^0.45.4",
     "nestjs-pino": "^5.3.2",
     "pg": "^8.23.1",
     "pino-http": "^11.0.0",
@@ -44,6 +46,7 @@
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.0.0",
     "@vitest/coverage-v8": "^4.1.2",
+    "drizzle-kit": "^0.31.11",
     "oxlint": "^1.58.0",
     "oxlint-tsgolint": "^7.0.2001",
     "prettier": "^3.4.2",

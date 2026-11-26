@@ -174,12 +174,12 @@ apps/api/
     ├── modules/projects/
     │   ├── projects.controller.ts       # HTTP only
     │   ├── projects.service.ts          # use cases; depends on ProjectsRepository + MediaStorage
-    │   ├── projects.repository.ts       # abstract ProjectsRepository (DI token) + DrizzleProjectsRepository
+    │   ├── projects.repository.ts       # ProjectsRepository: all project SQL (Drizzle)
     │   └── projects.schemas.ts          # zod request schemas + DTO types
     └── modules/videos/
         ├── videos.controller.ts         # HTTP only
         ├── videos.service.ts            # orchestrates import, list, delete, startup recovery
-        ├── videos.repository.ts         # abstract VideosRepository + DrizzleVideosRepository
+        ├── videos.repository.ts         # VideosRepository: all video SQL (Drizzle)
         ├── videos.schemas.ts
         └── import/
             ├── container-signatures.ts  # table of ContainerFormat {extensions, mime, matches(header)} — add a format = add a row
@@ -207,13 +207,13 @@ Responsibilities, Nest side:
 |---|---|
 | Controller | HTTP only |
 | Service | Use cases |
-| Repository | All SQL. An abstract class is used as the DI token, so service unit tests can inject a fake |
+| Repository | All SQL, in one concrete class. Service unit tests inject a fake through the constructor; no abstract class, since there is one implementation (`CLAUDE.md`) |
 | `import/` classes | Each does one step of the import and is unit-tested alone |
 
 ## Code Style
 
 Follow `CLAUDE.md` (OOP + SOLID, at most 300 lines per file) and the Phase 1 refactor:
-- Nest modules own their logic. Controllers only map HTTP to service calls. Services depend on abstract repositories and storage, never on Drizzle or `fs` directly.
+- Nest modules own their logic. Controllers only map HTTP to service calls. Services depend on injected repositories and storage, never on Drizzle or `fs` directly.
 - zod schemas sit in `*.schemas.ts`.
 - Every repository method takes `userId` and filters by it.
 
@@ -233,10 +233,11 @@ export class VideosController {
   }
 }
 
-export abstract class VideosRepository {
-  abstract insertImporting(video: NewVideo): Promise<Video>;
-  abstract findOwned(userId: string, id: string): Promise<Video | undefined>;
-  abstract updateProgress(id: string, bytesCopied: number): Promise<void>;
+@Injectable()
+export class VideosRepository {
+  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  insertImporting(video: NewImport): Promise<VideoRecord> { /* … */ }
+  findOwned(userId: string, id: string): Promise<VideoRecord | undefined> { /* … */ }
   // ...
 }
 ```

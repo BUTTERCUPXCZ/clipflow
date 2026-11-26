@@ -1,6 +1,9 @@
 import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/app-shell";
+import { ProjectList } from "@/features/projects/components/project-list";
+import { ProjectPage } from "@/features/projects/components/project-page";
 import { SystemStatus } from "@/features/system/system-status";
+import { ProjectVideos } from "@/features/videos/components/project-videos";
 
 const rootRoute = createRootRoute({ component: AppShell });
 
@@ -8,7 +11,26 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/status" });
+    throw redirect({ to: "/projects" });
+  },
+});
+
+const projectsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects",
+  component: ProjectList,
+});
+
+const projectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId",
+  component: function ProjectRoute() {
+    const { projectId } = projectRoute.useParams();
+    return (
+      <ProjectPage projectId={projectId}>
+        <ProjectVideos projectId={projectId} />
+      </ProjectPage>
+    );
   },
 });
 
@@ -18,7 +40,9 @@ const statusRoute = createRoute({
   component: SystemStatus,
 });
 
-export const router = createRouter({ routeTree: rootRoute.addChildren([indexRoute, statusRoute]) });
+export const router = createRouter({
+  routeTree: rootRoute.addChildren([indexRoute, projectsRoute, projectRoute, statusRoute]),
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

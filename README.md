@@ -6,7 +6,7 @@ ClipForge AI is a desktop app for content creators. You import a long video (a p
 
 Everything runs locally. Speech recognition, visual understanding and rendering all happen on your computer, so you need no cloud account or paid AI API, and your footage never leaves your machine.
 
-> **Status:** Phase 1 (application foundation) is complete. The desktop app, API, AI service, database and model runtime are wired together and health-checked end to end. Video import, analysis and rendering arrive in Phases 2–6. See the [roadmap](#roadmap).
+> **Status:** Phases 1–2 are complete. You can create projects and import local videos into them: every common video format is supported, files are validated and copied in the background with live progress, and interrupted imports recover cleanly. Analysis and rendering arrive in Phases 3–6. See the [roadmap](#roadmap).
 
 ---
 
@@ -60,7 +60,7 @@ The full design is in [`doc/architecture.md`](doc/architecture.md) and [`doc/sys
 | AI service | Python 3.13, FastAPI, gRPC (`grpcio`), structlog, pydantic-settings, uv |
 | AI models | Qwen3-VL via Ollama, faster-whisper |
 | Media | FFmpeg / FFprobe |
-| Infrastructure | PostgreSQL 16, Redis (append-only persistence), local filesystem |
+| Infrastructure | PostgreSQL 16 + Drizzle ORM, Redis (append-only persistence), local filesystem |
 
 ## Project structure
 
@@ -72,6 +72,7 @@ clipflow/
 │   └── ai-service/   # Python AI service (uv project)
 ├── proto/ai/v1/      # gRPC contracts shared by API and AI service
 ├── doc/              # architecture and system design
+├── spec/             # approved specs per phase
 ├── tasks/            # implementation plans
 └── .env.example      # one root .env, read by every app
 ```
@@ -108,6 +109,7 @@ One-time database setup. Your OS user gets a matching Postgres role, so it conne
 ```bash
 sudo -u postgres createuser -p 5433 "$USER"
 sudo -u postgres createdb -p 5433 -O "$USER" clipforge
+sudo -u postgres createdb -p 5433 -O "$USER" clipforge_test   # for the API test suite
 ```
 
 Adjust the port to match your cluster (`pg_lsclusters`), here and in `DATABASE_URL`. Re-run `gen_proto.py` whenever a file under `proto/` changes.
@@ -127,7 +129,8 @@ In a terminal, logs are readable colored lines. When output is redirected to a f
 ### Test and build
 
 ```bash
-npm test              # desktop + api (Vitest), then ai-service (pytest)
+npm test              # 300-line check, desktop + api (Vitest), then ai-service (pytest)
+                      # the API suite needs the clipforge_test database (see Setup)
 npm run build         # desktop + api
 ```
 
@@ -136,8 +139,8 @@ npm run build         # desktop + api
 | Phase | Goal | Status |
 |---|---|---|
 | 1 | Application foundation: all services running and talking | ✅ Done |
-| 2 | Projects and video import | Next |
-| 3 | Media processing: FFprobe, audio and frame extraction, job queue | Planned |
+| 2 | Projects and video import | ✅ Done |
+| 3 | Media processing: FFprobe, audio and frame extraction, job queue | Next |
 | 4 | Local AI: transcription and visual analysis, model experiments | Planned |
 | 5 | AI editing planner: highlights, clip boundaries, validated plans | Planned |
 | 6 | Automatic rendering: 9:16, subtitles, thumbnails | Planned |

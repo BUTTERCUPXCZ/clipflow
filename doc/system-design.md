@@ -159,25 +159,32 @@ The user selects one or more video files with the Tauri native file dialog.
 
 The desktop application sends each selected absolute path to NestJS (`POST /projects/:id/videos/import`).
 
-NestJS verifies user and project ownership, validates the file, and copies it into `MEDIA_ROOT/original-videos/...`. The user's original file is never modified or processed in place.
+NestJS verifies project ownership and validates the file. It then creates the source video record as `IMPORTING` and returns **202** at once. The copy into `MEDIA_ROOT/original-videos/{user}/{project}/{video}/source.{ext}` continues in the background. The user's original file is never modified or processed in place.
 
-After the copy succeeds, NestJS creates a source video record.
+### Validation (before anything is written)
 
-### Important considerations
+1. The path is absolute.
+2. It is a regular file. Directories, devices and symlinks are rejected; the copy also opens the file with `O_NOFOLLOW`.
+3. The extension is a known video container: mp4, m4v, mov, 3gp, 3g2, mkv, webm, avi, ts, mts, m2ts, mpg, mpeg, vob, wmv, asf, flv, ogv, mxf.
+4. The size is between 1 byte and 50 GiB.
+5. The file is not already inside `MEDIA_ROOT`.
+6. The container signature matches the extension's family. The table is in `container-signatures.ts`; whether the codecs decode is FFprobe's job in Phase 3.
+7. The media disk has room for the file plus 1 GiB.
 
-- Accept only regular files (reject directories, devices, and symlinks).
-- Validate file extension and container signature.
-- Validate maximum file size and free disk space before copying.
+### Copy
+
 - Stream the copy; never load the file into memory.
-- Copy to a temporary name and rename on completion, so interrupted imports leave no partial source files.
-- Report copy progress over WebSocket for large files.
+- Write to `source.{ext}.part`, check the size, then rename, so an interrupted import never leaves a file that looks finished.
+- Write `bytes_copied` at most once a second. The desktop polls the video list every second while any video is `IMPORTING`.
+- Deleting a video aborts its copy at once. If the row disappears (the video or its project was deleted), the copy stops at its next progress tick and removes its files.
+- At startup, any video still `IMPORTING` is marked `FAILED` ("Import interrupted") and its directory is removed.
 - Store the relative media path, not the file binary, in PostgreSQL.
 
 The import endpoint assumes the desktop and API share a filesystem, which holds for the local-first MVP. A remote API would need a streaming upload endpoint instead.
 
 ### Expected result
 
-A source video record with an initial status of `UPLOADED`.
+A source video record that goes `IMPORTING` → `READY`, or `FAILED` with an `error_message`.
 
 ## 4.2 Step 2 — Validate Video
 
@@ -1114,7 +1121,12 @@ Do not hardcode model names throughout the application.
 
 ### Authentication
 
-To be decided in Phase 2: a single implicit local user (no login), or accounts managed by NestJS. Whatever is chosen, NestJS resolves the current user for every request and the API listens on localhost only.
+Single implicit local user (no login), decided in Phase 2.
+- `@CurrentUser()` resolves the user id for every request.
+- Every repository method filters by that id, so another user's id gives 404, not 403.
+- The API listens on localhost only.
+
+Real accounts would replace only the `@CurrentUser()` decorator.
 
 ### Authorization
 
@@ -1246,7 +1258,7 @@ Tasks:
 - Create health endpoints.
 - Verify local communication.
 
-The Phase 1 gRPC surface is `VideoAnalysisService.GetModelStatus` only; the remaining RPCs arrive with the phases that use them. Database access uses a plain `pg` pool; the ORM/migration tool is chosen in Phase 2 together with the first tables.
+The Phase 1 gRPC surface is `VideoAnalysisService.GetModelStatus` only; the remaining RPCs arrive with the phases that use them. Database access uses a plain `pg` pool. Phase 2 adds Drizzle on top of it.
 
 Acceptance criteria:
 
@@ -1259,16 +1271,19 @@ Acceptance criteria:
 
 ## Phase 2 — Project and Video Management
 
-Goal: Upload and manage source videos.
+Goal: Import and manage source videos.
+
+Spec: `spec/SPEC-phase-2.md`. Plan: `tasks/phase-2-plan.md`.
 
 Tasks:
 
-- Implement authentication.
+- Single local user and the `@CurrentUser()` seam (no login).
+- Drizzle schema and migrations (users, projects, source_videos), applied at API startup.
 - Implement project CRUD.
-- Implement video metadata.
-- Implement video import into `MEDIA_ROOT`.
+- Implement file metadata (name, size, MIME type). Media metadata comes from FFprobe in Phase 3.
+- Implement validated background import into `MEDIA_ROOT`, with polled progress (§4.1).
 - Implement video listing.
-- Implement video deletion.
+- Implement video deletion, including cancelling an import in progress.
 
 Acceptance criteria:
 
@@ -1276,7 +1291,7 @@ Acceptance criteria:
 - User can import a video.
 - Imported video is stored in the media directory.
 - Video metadata is persisted.
-- User can see uploaded videos after restarting the application.
+- User can see imported videos after restarting the application.
 
 ## Phase 3 — Media Processing Foundation
 

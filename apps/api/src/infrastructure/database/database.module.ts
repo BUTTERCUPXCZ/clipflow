@@ -2,8 +2,10 @@ import { Global, Inject, Logger, Module, OnApplicationShutdown } from '@nestjs/c
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
+import { createDatabase, DRIZZLE, PG_POOL } from './database.tokens.js';
+import { MigrationRunner } from './migration-runner.js';
 
-export const PG_POOL = Symbol('PG_POOL');
+export { DRIZZLE, PG_POOL, type Database } from './database.tokens.js';
 
 @Global()
 @Module({
@@ -16,15 +18,17 @@ export const PG_POOL = Symbol('PG_POOL');
           connectionString: config.get('DATABASE_URL', { infer: true }),
           max: 5,
           connectionTimeoutMillis: 3000,
-          query_timeout: 3000,
+          query_timeout: 10_000,
         });
         // Without a listener, an idle client dropped by the server crashes the process.
         pool.on('error', (err) => new Logger('Postgres').error(`idle client error: ${err.message}`));
         return pool;
       },
     },
+    { provide: DRIZZLE, inject: [PG_POOL], useFactory: createDatabase },
+    MigrationRunner,
   ],
-  exports: [PG_POOL],
+  exports: [PG_POOL, DRIZZLE],
 })
 export class DatabaseModule implements OnApplicationShutdown {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
