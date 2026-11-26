@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package ai.v1;
+
+// Internal contract: NestJS (client) -> Python AI service (server).
+// Phase 1 exposes only GetModelStatus; StartAnalysis, CancelAnalysis,
+// GetAnalysisStatus and RunVisualExperiment are added in later phases.
+service VideoAnalysisService {
+  rpc GetModelStatus(GetModelStatusRequest) returns (GetModelStatusResponse);
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_MODEL_RUNTIME_UNAVAILABLE = 1;
+}
+
+message GetModelStatusRequest {}
+
+message ModelInfo {
+  string name = 1;
+  int64 size_bytes = 2;
+}
+
+message GetModelStatusResponse {
+  bool runtime_reachable = 1;
+  repeated ModelInfo installed_models = 2;
+  string configured_vision_model = 3;
+  bool configured_vision_model_installed = 4;
+  ErrorCode error_code = 5;
+}

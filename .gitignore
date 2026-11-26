@@ -1,0 +1,29 @@
+# secrets
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+apps/ai-service/app/generated/
+
+# rust / tauri
+target/
+apps/desktop/src-tauri/gen/
+
+# misc
+.DS_Store
+*.log
+
+# third-party skill, restored from skills-lock.json (npx skills experimental_install)
+.claude/skills/design-taste-frontend/

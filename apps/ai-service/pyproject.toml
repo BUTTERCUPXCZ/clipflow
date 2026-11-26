@@ -1,0 +1,27 @@
+[project]
+name = "clipforge-ai-service"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.165.0",
+    "grpcio>=1.85.4",
+    "httpx>=0.28.1",
+    "protobuf>=7.36.2",
+    "pydantic-settings>=2.16.3",
+    "redis>=8.2.0",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.85.4",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
