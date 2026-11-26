@@ -29,6 +29,14 @@ export class EventsGateway {
     this.broadcast('job.updated', job);
   }
 
+  renderUpdated(render: unknown): void {
+    this.broadcast('render.updated', render);
+  }
+
+  planUpdated(plan: unknown): void {
+    this.broadcast('plan.updated', plan);
+  }
+
   experimentUpdated(experiment: unknown): void {
     this.broadcast('experiment.updated', experiment);
   }

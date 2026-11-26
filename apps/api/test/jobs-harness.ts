@@ -14,6 +14,8 @@ import type {
   StartAnalysisRequest,
   StartAnalysisResult,
   StartExperimentRequest,
+  StartPlanningRequest,
+  StartRenderingRequest,
 } from '../src/infrastructure/grpc/ai-service.client.js';
 import { MediaStorage } from '../src/infrastructure/storage/media-storage.js';
 import type { EventsGateway } from '../src/modules/jobs/events.gateway.js';
@@ -44,6 +46,19 @@ export class FakeRunner implements AnalysisRunner {
 
   experiments: StartExperimentRequest[] = [];
   models: ModelInfo[] = [{ name: 'qwen3-vl:8b-instruct', sizeBytes: 6e9, vision: true }, { name: 'gemma3:1b', sizeBytes: 8e8, vision: false }];
+
+  plans: StartPlanningRequest[] = [];
+  renders: StartRenderingRequest[] = [];
+
+  startRendering(request: StartRenderingRequest): Promise<StartAnalysisResult> {
+    this.renders.push(request);
+    return this.startResult instanceof Error ? Promise.reject(this.startResult) : Promise.resolve(this.startResult);
+  }
+
+  startPlanning(request: StartPlanningRequest): Promise<StartAnalysisResult> {
+    this.plans.push(request);
+    return this.startResult instanceof Error ? Promise.reject(this.startResult) : Promise.resolve(this.startResult);
+  }
 
   startExperiment(request: StartExperimentRequest): Promise<StartAnalysisResult> {
     this.experiments.push(request);
@@ -78,6 +93,17 @@ export class RecordingGateway {
 
   experimentUpdated(experiment: { status: string }): void {
     this.experiments.push(experiment);
+  }
+
+  plans: { status: string }[] = [];
+  renders: { status: string }[] = [];
+
+  renderUpdated(render: { status: string }): void {
+    this.renders.push(render);
+  }
+
+  planUpdated(plan: { status: string }): void {
+    this.plans.push(plan);
   }
 }
 

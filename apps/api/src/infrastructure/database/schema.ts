@@ -224,3 +224,6 @@ export type ExperimentRow = typeof experiments.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type SourceVideoRow = typeof sourceVideos.$inferSelect;
 export type NewSourceVideoRow = typeof sourceVideos.$inferInsert;
+
+export * from './plans.schema.js';
+export * from './renders.schema.js';

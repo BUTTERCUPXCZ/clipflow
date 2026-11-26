@@ -6,7 +6,7 @@ ClipForge AI is a desktop app for content creators. You import a long video (a p
 
 Everything runs locally. Speech recognition, visual understanding and rendering all happen on your computer, so you need no cloud account or paid AI API, and your footage never leaves your machine.
 
-> **Status:** Phases 1–4 are complete. You can create projects, import videos (validated, copied, and inspected with FFprobe), and **process** them: a background worker extracts audio and frames, transcribes speech with faster-whisper, and describes the frames with a local vision model through Ollama. Progress is live over a WebSocket, with cancel and crash recovery. **Model experiments** rerun the visual analysis with another installed model or setting and compare speed, VRAM and output side by side. The editing planner and rendering arrive in Phases 5–6. See the [roadmap](#roadmap).
+> **Status:** Phases 1–7 are complete: the MVP workflow runs end to end without a terminal. You can create projects, import videos (validated, copied, and inspected with FFprobe), and **process** them: a background worker extracts audio and frames, transcribes speech with faster-whisper, and describes the frames with a local vision model through Ollama. Progress is live over a WebSocket, with cancel and crash recovery. **Model experiments** rerun the visual analysis with another installed model or setting and compare speed, VRAM and output side by side. **Plan clips** proposes short clips from the transcript and the visual timeline: title, hook, caption and why it was chosen. You can preview, remove or adjust clips. **Render clips** turns them into 9:16 1080×1920 MP4s (blurred-background fit, burned-in captions, loudness-normalized audio, GPU-encoded when NVENC is available), which you play in the app and **Save…** or **Export all** to any folder. The **Clips** page lists every rendered short and **Activity** shows running and recent work. See the [roadmap](#roadmap).
 
 ---
 
@@ -143,8 +143,8 @@ npm run build         # desktop + api
 | 2 | Projects and video import | ✅ Done |
 | 3 | Media processing: FFprobe, audio and frame extraction, job queue | ✅ Done |
 | 4 | Local AI: transcription and visual analysis, model experiments | ✅ Done |
-| 5 | AI editing planner: highlights, clip boundaries, validated plans | Planned |
-| 6 | Automatic rendering: 9:16, subtitles, thumbnails | Planned |
-| 7 | Complete desktop experience: progress, gallery, preview, export | Planned |
+| 5 | AI editing planner: highlights, clip boundaries, validated plans | ✅ Done |
+| 6 | Automatic rendering: 9:16, subtitles, thumbnails | ✅ Done |
+| 7 | Complete desktop experience: progress, gallery, preview, export | ✅ Done |
 
 Later: combining multiple source videos, smarter reframing, music and B-roll, and direct publishing to social platforms.

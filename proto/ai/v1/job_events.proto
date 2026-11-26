@@ -15,6 +15,16 @@ service JobEventsService {
   rpc ReportExperimentProgress(ReportExperimentProgressRequest) returns (ReportAck);
   rpc ReportExperimentCompletion(ReportExperimentCompletionRequest) returns (ReportAck);
   rpc ReportExperimentFailure(ReportExperimentFailureRequest) returns (ReportAck);
+
+  // Phase 5: editing plans, same ack rules.
+  rpc ReportPlanProgress(ReportPlanProgressRequest) returns (ReportAck);
+  rpc ReportPlanCompletion(ReportPlanCompletionRequest) returns (ReportAck);
+  rpc ReportPlanFailure(ReportPlanFailureRequest) returns (ReportAck);
+
+  // Phase 6: rendering, same ack rules.
+  rpc ReportRenderProgress(ReportRenderProgressRequest) returns (ReportAck);
+  rpc ReportRenderCompletion(ReportRenderCompletionRequest) returns (ReportAck);
+  rpc ReportRenderFailure(ReportRenderFailureRequest) returns (ReportAck);
 }
 
 enum JobStatus {
@@ -36,6 +46,9 @@ enum JobErrorCode {
   JOB_ERROR_CODE_MODEL_NOT_INSTALLED = 7;
   JOB_ERROR_CODE_TRANSCRIPTION_FAILED = 8;
   JOB_ERROR_CODE_VISION_INVALID = 9;  // not one batch of model output passed validation
+  JOB_ERROR_CODE_NO_SPEECH = 10;      // planning needs a transcript with speech
+  JOB_ERROR_CODE_PLAN_INVALID = 11;   // no clip survived validation
+  JOB_ERROR_CODE_RENDER_FAILED = 12;  // no clip could be rendered
 }
 
 message ReportProgressRequest {
@@ -106,6 +119,63 @@ message ReportExperimentCompletionRequest {
 
 message ReportExperimentFailureRequest {
   string experiment_id = 1;
+  int64 sequence = 2;
+  JobErrorCode error_code = 3;
+  string error_message = 4;
+}
+
+message PlanMetrics {
+  int32 llm_calls = 1;
+  int64 elapsed_ms = 2;
+  int32 windows = 3;
+  int32 skipped_windows = 4;
+  int32 clip_count = 5;
+}
+
+message ReportPlanProgressRequest {
+  string plan_id = 1;
+  int64 sequence = 2;
+  int32 progress = 3;
+  string message = 4;
+}
+
+message ReportPlanCompletionRequest {
+  string plan_id = 1;
+  int64 sequence = 2;
+  string output_path = 3;  // plan.json, relative to MEDIA_ROOT
+  PlanMetrics metrics = 4;
+}
+
+message ReportPlanFailureRequest {
+  string plan_id = 1;
+  int64 sequence = 2;
+  JobErrorCode error_code = 3;
+  string error_message = 4;
+}
+
+message RenderMetrics {
+  int32 rendered = 1;
+  int32 failed = 2;
+  int64 elapsed_ms = 3;
+  string encoder = 4;
+}
+
+message ReportRenderProgressRequest {
+  string render_id = 1;
+  int64 sequence = 2;
+  int32 progress = 3;
+  string message = 4;
+}
+
+message ReportRenderCompletionRequest {
+  string render_id = 1;
+  int64 sequence = 2;
+  string output_path = 3;  // render.json, relative to MEDIA_ROOT
+  RenderMetrics metrics = 4;
+}
+
+message ReportRenderFailureRequest {
+  string render_id = 1;
   int64 sequence = 2;
   JobErrorCode error_code = 3;
   string error_message = 4;

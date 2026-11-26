@@ -1,7 +1,9 @@
 import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/app-shell";
+import { ActivityPage } from "@/features/activity/activity-page";
 import { ProjectList } from "@/features/projects/components/project-list";
 import { ProjectPage } from "@/features/projects/components/project-page";
+import { ClipsPage } from "@/features/renders/components/clips-page";
 import { SystemStatus } from "@/features/system/system-status";
 import { ProjectVideos } from "@/features/videos/components/project-videos";
 import { VideoPage } from "@/features/videos/components/video-page";
@@ -50,8 +52,20 @@ const statusRoute = createRoute({
   component: SystemStatus,
 });
 
+const clipsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/clips",
+  component: ClipsPage,
+});
+
+const activityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/activity",
+  component: ActivityPage,
+});
+
 export const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, projectsRoute, projectRoute, videoRoute, statusRoute]),
+  routeTree: rootRoute.addChildren([indexRoute, projectsRoute, projectRoute, videoRoute, clipsRoute, activityRoute, statusRoute]),
 });
 
 declare module "@tanstack/react-router" {

@@ -30,10 +30,23 @@ TOKENS_PER_IMAGE = 1100
 PROMPT_TOKENS = 256
 
 
-def context_size(images: int, max_tokens: int) -> int:
+CHARS_PER_TOKEN = 3  # conservative for ASCII text
+TEXT_ONLY_MIN_CONTEXT = 4096  # Ollama's own default: text calls never get less
+
+
+def prompt_tokens(prompt: str) -> int:
+    """Upper-bound estimate: ASCII at ~3 chars per token; every other character (CJK, Cyrillic, Arabic, accents)
+    counted as a whole token, so non-Latin transcripts are never truncated by a too-small context."""
+    ascii_chars = sum(1 for ch in prompt if ord(ch) < 128)
+    return ascii_chars // CHARS_PER_TOKEN + (len(prompt) - ascii_chars)
+
+
+def context_size(images: int, max_tokens: int, prompt: str = "") -> int:
     """Smallest context (whole KiB of tokens) that fits the request: a bigger one costs VRAM and pushes layers
-    to the CPU; Ollama's default 4096 is too small for 4 frames."""
-    needed = images * TOKENS_PER_IMAGE + PROMPT_TOKENS + max_tokens
+    to the CPU; Ollama's default 4096 is too small for 4 frames or a long transcript window."""
+    needed = images * TOKENS_PER_IMAGE + PROMPT_TOKENS + prompt_tokens(prompt) + max_tokens
+    if not images:
+        needed = max(needed, TEXT_ONLY_MIN_CONTEXT)
     return -(-needed // 1024) * 1024
 
 
@@ -49,7 +62,7 @@ class OllamaVisionClient:
             "format": schema,
             "keep_alive": self._keep_alive,
             # temperature 0: same frames → same answer, which evals and experiments rely on.
-            "options": {"temperature": 0, "num_predict": max_tokens, "num_ctx": context_size(len(images), max_tokens)},
+            "options": {"temperature": 0, "num_predict": max_tokens, "num_ctx": context_size(len(images), max_tokens, prompt)},
             "messages": [
                 {"role": "user", "content": prompt, "images": [base64.b64encode(p.read_bytes()).decode() for p in images]}
             ],

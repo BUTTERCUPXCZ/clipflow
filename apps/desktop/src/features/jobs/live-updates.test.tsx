@@ -7,6 +7,7 @@ import type { Job } from "./api";
 import { analysisKey } from "@/features/analysis/queries";
 import type { Experiment } from "@/features/experiments/api";
 import { experimentKeys } from "@/features/experiments/queries";
+import { planKeys } from "@/features/plans/queries";
 import { NoWorkerHint } from "./components/processing-card";
 import { jobKeys, useLiveJobUpdates } from "./queries";
 
@@ -113,6 +114,17 @@ describe("EventsClient restart (React StrictMode: start → stop → start)", ()
     );
 
     expect(queryClient.getQueryData<Experiment[]>(experimentKeys.forVideo("v1"))?.[0].progress).toBe(60);
+  });
+});
+
+describe("plan.updated", () => {
+  it("refetches plans, since the event carries no clips", () => {
+    const { sockets, queryClient } = setup();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    act(() => sockets[0].onmessage?.({ data: JSON.stringify({ event: "plan.updated", data: { id: "p1", status: "COMPLETED" } }) }));
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: planKeys.all });
   });
 });
 

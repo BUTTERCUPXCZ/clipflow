@@ -17,12 +17,9 @@ import { ANALYSIS_RUNNER } from '../../infrastructure/grpc/grpc.module.js';
 import { MediaStorage } from '../../infrastructure/storage/media-storage.js';
 import { VideosRepository } from '../videos/videos.repository.js';
 import { AnalysesRepository } from './analyses.repository.js';
+import { isUniqueViolation } from '../../common/database-errors.js';
 import { EventsGateway } from './events.gateway.js';
 import { ACTIVE_JOB_STATUSES, type Job, JobsRepository, toJob } from './jobs.repository.js';
-
-const isUniqueViolation = (error: unknown): boolean =>
-  (error as { code?: string; cause?: { code?: string } })?.code === '23505' ||
-  (error as { cause?: { code?: string } })?.cause?.code === '23505';
 
 export interface FrameInfo {
   index: number;

@@ -36,6 +36,12 @@ class FakeQueue:
     def workers_running(self) -> bool:
         return True
 
+    def enqueue_plan(self, plan_id, params) -> None:
+        self.enqueued.append(("plan", plan_id, params))
+
+    def enqueue_render(self, render_id, params) -> None:
+        self.enqueued.append(("render", render_id, params))
+
 
 @pytest.fixture
 def media_root(tmp_path, videos):
@@ -144,3 +150,75 @@ async def test_start_experiment_enqueues_on_the_same_queue(media_root):
 
     assert response.accepted
     assert queue.enqueued == [("experiment", "e1", "analysis/j1/frames", "analysis/experiments/e1", "m", 60, 4)]
+
+
+P1 = "11111111-1111-4111-8111-111111111111"
+R1 = "22222222-2222-4222-8222-222222222222"
+C1 = "33333333-3333-4333-8333-333333333333"
+
+
+def planning(**overrides):
+    fields = dict(
+        plan_id=P1, transcript_path="analysis/j1/transcript.json", visual_path="analysis/j1/visual.json",
+        output_path=f"analysis/j1/plans/{P1}", duration_seconds=600.0, min_seconds=15, max_seconds=60, max_clips=4, model="m",
+    )
+    return pb2.StartPlanningRequest(**(fields | overrides))
+
+
+async def test_start_planning_enqueues_validated_settings(media_root):
+    queue = FakeQueue()
+
+    response = await call("StartPlanning", planning(), queue=queue, media_root=media_root)
+
+    assert response.accepted
+    assert queue.enqueued[0][:2] == ("plan", P1) and queue.enqueued[0][2]["max_clips"] == 4
+
+
+@pytest.mark.parametrize("overrides", [{"min_seconds": 90, "max_seconds": 30}, {"max_clips": 0}, {"duration_seconds": 0}, {"model": ""},
+     {"duration_seconds": float("nan")}, {"output_path": "analysis/j1"}, {"plan_id": ""}, {"plan_id": "p1"}])
+async def test_start_planning_rejects_bad_settings(media_root, overrides):
+    queue = FakeQueue()
+    response = await call("StartPlanning", planning(**overrides), queue=queue, media_root=media_root)
+    assert not response.accepted and queue.enqueued == []
+
+
+async def test_start_planning_rejects_paths_outside_analysis(media_root):
+    response = await call("StartPlanning", planning(transcript_path="src/x.json"), media_root=media_root)
+    assert not response.accepted and response.error_code == pb2.ERROR_CODE_INVALID_PATH
+
+
+def rendering(clips=None, **overrides):
+    clip = pb2.RenderClipSpec(clip_id=C1, start=1.0, end=20.0, cues=[pb2.SubtitleCue(start=0.1, end=1.0, text="Hi")])
+    fields = dict(render_id=R1, source_path="original-videos/u/p/v/source.mp4", output_path=f"analysis/j1/renders/{R1}",
+                  subtitles=True, clips=[clip] if clips is None else clips)
+    return pb2.StartRenderingRequest(**(fields | overrides))
+
+
+async def test_start_rendering_enqueues_the_clips_with_their_cues(media_root):
+    queue = FakeQueue()
+
+    response = await call("StartRendering", rendering(), queue=queue, media_root=media_root)
+
+    assert response.accepted
+    kind, render_id, params = queue.enqueued[0]
+    assert (kind, render_id) == ("render", R1)
+    assert params["clips"] == [{"clip_id": C1, "start": 1.0, "end": 20.0, "cues": [{"start": 0.1, "end": 1.0, "text": "Hi"}]}]
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        rendering(clips=[]),
+        rendering(output_path="analysis/j1"),
+        rendering(clips=[pb2.RenderClipSpec(clip_id=C1, start=5, end=5)]),
+        rendering(source_path="../outside.mp4"),
+        rendering(source_path="analysis/j1/transcript.json"),  # only original videos are sources
+        rendering(clips=[pb2.RenderClipSpec(clip_id="../../../home/u/Videos/holiday", start=1, end=2)]),
+        rendering(render_id="x/../..", output_path="analysis/j1/renders/x/../.."),
+        rendering(output_path=f"analysis/j1/plans/{R1}"),
+    ],
+)
+async def test_start_rendering_refuses_bad_requests(media_root, request_):
+    queue = FakeQueue()
+    response = await call("StartRendering", request_, queue=queue, media_root=media_root)
+    assert not response.accepted and queue.enqueued == []

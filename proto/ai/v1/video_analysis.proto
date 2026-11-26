@@ -19,6 +19,10 @@ service VideoAnalysisService {
   // Visual analysis of a completed job's frames with any installed vision model (system-design §10).
   // Cancel and status use CancelAnalysis / GetAnalysisStatus with the experiment id.
   rpc StartExperiment(StartExperimentRequest) returns (StartAnalysisResponse);
+  // Phase 5: clip planning from a completed job's transcript + visual analysis, on the same queue.
+  rpc StartPlanning(StartPlanningRequest) returns (StartAnalysisResponse);
+  // Phase 6: render a plan's kept clips (9:16, subtitles, loudness), on the same queue.
+  rpc StartRendering(StartRenderingRequest) returns (StartAnalysisResponse);
 }
 
 enum ErrorCode {
@@ -113,4 +117,37 @@ message StartExperimentRequest {
   string model = 4;
   int32 max_frames = 5;
   int32 batch_size = 6;
+}
+
+message StartPlanningRequest {
+  string plan_id = 1;
+  string transcript_path = 2;  // relative, under analysis/
+  string visual_path = 3;      // relative, under analysis/
+  string output_path = 4;      // directory for plan.json (relative, under analysis/)
+  double duration_seconds = 5;
+  int32 min_seconds = 6;
+  int32 max_seconds = 7;
+  int32 max_clips = 8;
+  string model = 9;
+}
+
+message SubtitleCue {
+  double start = 1;  // seconds from the clip start
+  double end = 2;
+  string text = 3;
+}
+
+message RenderClipSpec {
+  string clip_id = 1;
+  double start = 2;
+  double end = 3;
+  repeated SubtitleCue cues = 4;
+}
+
+message StartRenderingRequest {
+  string render_id = 1;
+  string source_path = 2;  // the original video, relative to MEDIA_ROOT
+  string output_path = 3;  // this render's directory (relative, under analysis/, ending in renders/<render_id>)
+  bool subtitles = 4;
+  repeated RenderClipSpec clips = 5;
 }

@@ -1,5 +1,6 @@
 """Queue, events and worker recovery against a real Redis (db 15) and an in-process fake NestJS."""
 
+import json
 import shutil
 from concurrent import futures
 
@@ -43,6 +44,24 @@ class FakeNest(pb2_grpc.JobEventsServiceServicer):
 
     def ReportExperimentFailure(self, request, context):  # noqa: N802
         return self._record("experiment_failure", request)
+
+    def ReportPlanProgress(self, request, context):  # noqa: N802
+        return self._record("plan_progress", request)
+
+    def ReportPlanCompletion(self, request, context):  # noqa: N802
+        return self._record("plan_completion", request)
+
+    def ReportPlanFailure(self, request, context):  # noqa: N802
+        return self._record("plan_failure", request)
+
+    def ReportRenderProgress(self, request, context):  # noqa: N802
+        return self._record("render_progress", request)
+
+    def ReportRenderCompletion(self, request, context):  # noqa: N802
+        return self._record("render_completion", request)
+
+    def ReportRenderFailure(self, request, context):  # noqa: N802
+        return self._record("render_failure", request)
 
 
 @pytest.fixture
@@ -180,3 +199,67 @@ def test_a_real_worker_runs_the_whole_job(redis, nest, tmp_path, videos, monkeyp
     sequences = [r.sequence for _, r in nest.events]
     assert sequences == sorted(sequences) and len(set(sequences)) == len(sequences)
     assert queue.state("j1") == "FINISHED"
+
+
+def test_cancelling_a_queued_plan_reports_it_as_a_plan(redis, nest):
+    queue = JobQueue(redis, CancellationFlags(redis), JobEventsClient(nest.target, redis))
+    queue.enqueue_plan("p1", {"transcript_path": "analysis/j/t.json"})
+
+    assert queue.cancel("p1") is True
+    assert kinds(nest) == ["plan_failure"] and nest.events[0][1].plan_id == "p1"
+
+
+def test_a_real_worker_plans_clips_with_a_fake_model(redis, nest, tmp_path, monkeypatch):
+    from tests.test_planning import FakeLlm, transcript
+
+    job_dir = tmp_path / "analysis/j1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "transcript.json").write_text(json.dumps(transcript()))
+    (job_dir / "visual.json").write_text(json.dumps({"scenes": []}))
+    monkeypatch.setattr(task, "_vision", lambda settings: FakeLlm())
+    monkeypatch.setenv("MEDIA_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDIS_URL", TEST_REDIS)
+    monkeypatch.setenv("JOB_EVENTS_GRPC_URL", nest.target)
+    queue = JobQueue(redis, CancellationFlags(redis), JobEventsClient(nest.target, redis))
+    queue.enqueue_plan("p1", {
+        "transcript_path": "analysis/j1/transcript.json", "visual_path": "analysis/j1/visual.json",
+        "output_path": "analysis/j1/plans/p1", "duration_seconds": 600.0,
+        "min_seconds": 15, "max_seconds": 60, "max_clips": 3, "model": "m",
+    })
+
+    SimpleWorker([queue.queue], connection=redis).work(burst=True)
+
+    assert kinds(nest)[0] == "plan_progress" and kinds(nest)[-1] == "plan_completion"
+    done = nest.events[-1][1]
+    plan = json.loads((tmp_path / done.output_path).read_text())
+    assert done.metrics.clip_count == len(plan["clips"]) == 3
+
+
+def test_a_real_worker_renders_a_clip_with_real_ffmpeg(redis, nest, tmp_path, videos, monkeypatch):
+    (tmp_path / "src").mkdir()
+    shutil.copy(videos.with_audio, tmp_path / "src/a.mp4")
+    monkeypatch.setenv("MEDIA_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDIS_URL", TEST_REDIS)
+    monkeypatch.setenv("JOB_EVENTS_GRPC_URL", nest.target)
+    monkeypatch.setenv("VIDEO_ENCODER", "x264")  # tests never depend on a GPU
+    queue = JobQueue(redis, CancellationFlags(redis), JobEventsClient(nest.target, redis))
+    queue.enqueue_render("r1", {
+        "source_path": "src/a.mp4", "output_path": "analysis/j1/renders/r1", "subtitles": True,
+        "clips": [{"clip_id": "c1", "start": 0.5, "end": 2.5, "cues": [{"start": 0.1, "end": 1.0, "text": "Hi"}]}],
+    })
+
+    SimpleWorker([queue.queue], connection=redis).work(burst=True)
+
+    assert kinds(nest)[0] == "render_progress" and kinds(nest)[-1] == "render_completion"
+    done = nest.events[-1][1]
+    assert (done.metrics.rendered, done.metrics.encoder) == (1, "libx264")
+    result = json.loads((tmp_path / done.output_path).read_text())
+    assert (tmp_path / result["clips"][0]["file"]).exists()
+
+
+def test_cancelling_a_queued_render_reports_it_as_a_render(redis, nest):
+    queue = JobQueue(redis, CancellationFlags(redis), JobEventsClient(nest.target, redis))
+    queue.enqueue_render("r1", {"source_path": "src/a.mp4"})
+
+    assert queue.cancel("r1") is True
+    assert kinds(nest) == ["render_failure"] and nest.events[0][1].render_id == "r1"

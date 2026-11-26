@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     media_root: Path = Path("~/.local/share/clipforge/media")
     vision_model: str = "qwen3-vl:4b-instruct"
-    transcription_model: str = "small"
+    transcription_model: str = "medium"  # eval: doc/evals/phase-4-whisper.md (fewer garbled phrases, ~1.9x small)
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
     vision_max_frames: int = 60
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     vision_request_timeout: float = 300.0
     vision_tokens_per_frame: int = 250  # 180 cut answers off (invalid JSON)
     ollama_keep_alive: str = "5m"
+    video_encoder: str = "auto"  # auto | nvenc | x264 (Phase 6 rendering)
 
     @field_validator("media_root")
     @classmethod

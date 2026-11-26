@@ -1,11 +1,13 @@
 import { Link, Outlet } from "@tanstack/react-router";
-import { Activity, FolderOpen, type LucideIcon } from "lucide-react";
+import { Activity, FolderOpen, type LucideIcon, Clapperboard, ListChecks } from "lucide-react";
 import { useLiveJobUpdates } from "@/features/jobs/queries";
 import { liveEvents } from "@/lib/live-events";
 import { TitleBar } from "./title-bar";
 
-const NAV: { to: "/projects" | "/status"; label: string; icon: LucideIcon }[] = [
+const NAV: { to: "/projects" | "/clips" | "/activity" | "/status"; label: string; icon: LucideIcon }[] = [
   { to: "/projects", label: "Projects", icon: FolderOpen },
+  { to: "/clips", label: "Clips", icon: Clapperboard },
+  { to: "/activity", label: "Activity", icon: ListChecks },
   { to: "/status", label: "System status", icon: Activity },
 ];
 

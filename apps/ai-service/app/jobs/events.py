@@ -103,6 +103,67 @@ class JobEventsClient:
         )
         self._send("ReportExperimentFailure", request, attempts=self._terminal_attempts)
 
+    def plan_progress(self, plan_id: str, progress: int, message: str = "") -> bool:
+        request = pb2.ReportPlanProgressRequest(
+            plan_id=plan_id, sequence=self._next_sequence(plan_id), progress=progress, message=message
+        )
+        ack = self._send("ReportPlanProgress", request, attempts=1)
+        return bool(ack and ack.stop)
+
+    def plan_completed(self, plan_id: str, output_path: str, metrics: dict) -> bool:
+        request = pb2.ReportPlanCompletionRequest(
+            plan_id=plan_id,
+            sequence=self._next_sequence(plan_id),
+            output_path=output_path,
+            metrics=pb2.PlanMetrics(
+                llm_calls=metrics["llmCalls"],
+                elapsed_ms=metrics["elapsedMs"],
+                windows=metrics["windows"],
+                skipped_windows=metrics["skippedWindows"],
+                clip_count=metrics["clipCount"],
+            ),
+        )
+        ack = self._send("ReportPlanCompletion", request, attempts=self._terminal_attempts)
+        return bool(ack and ack.stop)
+
+    def plan_failed(self, plan_id: str, code: str, message: str) -> None:
+        request = pb2.ReportPlanFailureRequest(
+            plan_id=plan_id,
+            sequence=self._next_sequence(plan_id),
+            error_code=pb2.JobErrorCode.Value(f"JOB_ERROR_CODE_{code}"),
+            error_message=message[:1000],
+        )
+        self._send("ReportPlanFailure", request, attempts=self._terminal_attempts)
+
+    def render_progress(self, render_id: str, progress: int, message: str = "") -> bool:
+        request = pb2.ReportRenderProgressRequest(
+            render_id=render_id, sequence=self._next_sequence(render_id), progress=progress, message=message
+        )
+        ack = self._send("ReportRenderProgress", request, attempts=1)
+        return bool(ack and ack.stop)
+
+    def render_completed(self, render_id: str, output_path: str, metrics: dict) -> bool:
+        request = pb2.ReportRenderCompletionRequest(
+            render_id=render_id,
+            sequence=self._next_sequence(render_id),
+            output_path=output_path,
+            metrics=pb2.RenderMetrics(
+                rendered=metrics["rendered"], failed=metrics["failed"],
+                elapsed_ms=metrics["elapsedMs"], encoder=metrics["encoder"],
+            ),
+        )
+        ack = self._send("ReportRenderCompletion", request, attempts=self._terminal_attempts)
+        return bool(ack and ack.stop)
+
+    def render_failed(self, render_id: str, code: str, message: str) -> None:
+        request = pb2.ReportRenderFailureRequest(
+            render_id=render_id,
+            sequence=self._next_sequence(render_id),
+            error_code=pb2.JobErrorCode.Value(f"JOB_ERROR_CODE_{code}"),
+            error_message=message[:1000],
+        )
+        self._send("ReportRenderFailure", request, attempts=self._terminal_attempts)
+
     def close(self) -> None:
         if self._channel is not None:
             self._channel.close()
@@ -115,7 +176,9 @@ class JobEventsClient:
         return sequence
 
     def _send(self, method: str, request, attempts: int):
-        job_id = getattr(request, "job_id", "") or getattr(request, "experiment_id", "")
+        job_id = next(
+            (getattr(request, f, "") for f in ("job_id", "experiment_id", "plan_id", "render_id") if getattr(request, f, "")), ""
+        )
         # The channel is created lazily: RQ forks per job, and gRPC channels must not cross a fork.
         if self._channel is None:
             self._channel = grpc.insecure_channel(self._target)

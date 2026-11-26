@@ -10,7 +10,7 @@ from rq.registry import StartedJobRegistry
 
 from app.config import Settings
 from app.jobs.events import EventSink, JobEventsClient
-from app.jobs.queue import EXPERIMENT_TASK, CancellationFlags, JobQueue
+from app.jobs.queue import CancellationFlags, JobQueue, report_failure
 from app.logging_config import configure_logging
 from app.media.media_paths import MediaPaths
 
@@ -33,10 +33,7 @@ def recover_interrupted(queue: JobQueue, events: EventSink, paths: MediaPaths) -
                 shutil.rmtree(paths.resolve_artifacts(artifacts), ignore_errors=True)
             except ValueError:
                 log.warning("recovery_bad_artifacts_path", job_id=job_id)
-        if job.func_name == EXPERIMENT_TASK:
-            events.experiment_failed(job_id, "INTERRUPTED", INTERRUPTED_MESSAGE)
-        else:
-            events.failed(job_id, "INTERRUPTED", INTERRUPTED_MESSAGE)
+        report_failure(events, job.func_name, job_id, "INTERRUPTED", INTERRUPTED_MESSAGE)
         # RQ 3 tracks executions: drop them from the registry, then the job itself.
         registry.remove_executions(job)
         job.delete()

@@ -36,6 +36,20 @@
       "when": 1795688045871,
       "tag": "0004_analysis_and_experiments",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795697793697,
+      "tag": "0005_editing_plans",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795699082701,
+      "tag": "0006_renders",
+      "breakpoints": true
     }
   ]
 }

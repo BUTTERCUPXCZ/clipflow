@@ -1,9 +1,12 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
+import { activityKey } from "@/features/activity/queries";
 import { analysisKey } from "@/features/analysis/queries";
 import { fetchHealth } from "@/features/system/api";
 import type { Experiment } from "@/features/experiments/api";
 import { upsertExperiment } from "@/features/experiments/queries";
+import { planKeys } from "@/features/plans/queries";
+import { renderKeys } from "@/features/renders/queries";
 import type { ConnectionState, EventsClient } from "@/lib/events";
 import { type Job, jobsApi } from "./api";
 
@@ -69,11 +72,24 @@ export function useLiveJobUpdates(events: EventsClient): void {
         if (job.status === "COMPLETED") void queryClient.invalidateQueries({ queryKey: analysisKey(job.sourceVideoId) });
       }
       if (message.event === "experiment.updated") upsertExperiment(queryClient, message.data as Experiment);
+      // A plan event carries no clips: refetch the plan list and the open plan.
+      if (message.event === "plan.updated") void queryClient.invalidateQueries({ queryKey: planKeys.all });
+      if (message.event === "render.updated") {
+        const render = message.data as { planId: string; status: string };
+        void queryClient.invalidateQueries({ queryKey: renderKeys.forPlan(render.planId) });
+        // Clips exist only once a render ends: the gallery and details refetch then, not on every progress tick.
+        if (!["PENDING", "RUNNING"].includes(render.status)) void queryClient.invalidateQueries({ queryKey: renderKeys.all });
+      }
+      // Any change to any work moves the Activity page.
+      void queryClient.invalidateQueries({ queryKey: activityKey });
     });
     const offState = events.onState((state) => {
       if (state === "open") {
         void queryClient.invalidateQueries({ queryKey: jobKeys.all });
         void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+        void queryClient.invalidateQueries({ queryKey: planKeys.all });
+        void queryClient.invalidateQueries({ queryKey: renderKeys.all });
+        void queryClient.invalidateQueries({ queryKey: activityKey });
       }
     });
     events.start();

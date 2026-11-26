@@ -1,4 +1,6 @@
 import asyncio
+import math
+import uuid
 from typing import Protocol
 
 import grpc
@@ -8,6 +10,7 @@ from app.generated.ai.v1 import video_analysis_pb2 as pb2
 from app.generated.ai.v1 import video_analysis_pb2_grpc as pb2_grpc
 from app.media.media_paths import MediaPaths, PathEscapeError
 from app.media.prober import MediaProber
+from app.planning.schemas import PlanSettings
 from app.services.model_runtime import ModelRuntime
 
 log = structlog.get_logger()
@@ -23,6 +26,8 @@ class AnalysisQueue(Protocol):
         self, experiment_id: str, frames_path: str, output_path: str, model: str, max_frames: int, batch_size: int
     ) -> None: ...
     def workers_running(self) -> bool: ...
+    def enqueue_plan(self, plan_id: str, params: dict) -> None: ...
+    def enqueue_render(self, render_id: str, params: dict) -> None: ...
 
 
 class VideoAnalysisServicer(pb2_grpc.VideoAnalysisServiceServicer):
@@ -100,6 +105,73 @@ class VideoAnalysisServicer(pb2_grpc.VideoAnalysisServiceServicer):
             )
         return pb2.StartAnalysisResponse(accepted=True)
 
+    async def StartPlanning(self, request, context):  # noqa: N802
+        try:
+            for path in (request.transcript_path, request.visual_path, request.output_path):
+                self._paths.resolve_artifacts(path)
+            params = {
+                "transcript_path": request.transcript_path,
+                "visual_path": request.visual_path,
+                "output_path": request.output_path,
+                "duration_seconds": request.duration_seconds,
+                "min_seconds": request.min_seconds,
+                "max_seconds": request.max_seconds,
+                "max_clips": request.max_clips,
+                "model": request.model,
+            }
+            PlanSettings(minSeconds=request.min_seconds, maxSeconds=request.max_seconds, maxClips=request.max_clips)
+            if not (math.isfinite(request.duration_seconds) and request.duration_seconds > 0) or not request.model:
+                raise ValueError("duration_seconds must be a positive number and model set")
+            if not _is_uuid(request.plan_id) or not request.output_path.rstrip("/").endswith(f"/plans/{request.plan_id}"):
+                # The runner removes output_path on failure: it must be this plan's own directory, never a job's.
+                raise ValueError("output_path must be the plan's own directory")
+            await asyncio.to_thread(self._queue.enqueue_plan, request.plan_id, params)
+        except PathEscapeError as exc:
+            return pb2.StartAnalysisResponse(accepted=False, error_code=pb2.ERROR_CODE_INVALID_PATH, error_message=str(exc))
+        except ValueError as exc:  # settings out of range (NestJS validates first; this is the trust boundary)
+            return pb2.StartAnalysisResponse(accepted=False, error_code=pb2.ERROR_CODE_UNSPECIFIED, error_message=str(exc))
+        except Exception as exc:  # Redis down
+            log.error("enqueue_plan_failed", plan_id=request.plan_id, error=str(exc))
+            return pb2.StartAnalysisResponse(
+                accepted=False, error_code=pb2.ERROR_CODE_QUEUE_UNAVAILABLE, error_message=str(exc)
+            )
+        return pb2.StartAnalysisResponse(accepted=True)
+
+    async def StartRendering(self, request, context):  # noqa: N802
+        try:
+            if not request.source_path.startswith("original-videos/"):
+                raise PathEscapeError("source_path must be an original video")
+            self._paths.resolve(request.source_path)
+            output = self._paths.resolve_artifacts(request.output_path)
+            # Ids become file names and the runner removes output_path on failure: UUIDs only, and the
+            # resolved directory must be exactly renders/<render_id>.
+            if not _is_uuid(request.render_id) or (output.parent.name, output.name) != ("renders", request.render_id):
+                raise ValueError("output_path must be the render's own directory")
+            if not request.clips:
+                raise ValueError("no clips to render")
+            clips = [
+                {
+                    "clip_id": c.clip_id, "start": c.start, "end": c.end,
+                    "cues": [{"start": q.start, "end": q.end, "text": q.text} for q in c.cues],
+                }
+                for c in request.clips
+            ]
+            if not all(_valid_clip(c) for c in clips):
+                raise ValueError("every clip needs an id and 0 <= start < end")
+            params = {"source_path": request.source_path, "output_path": request.output_path,
+                      "subtitles": request.subtitles, "clips": clips}
+            await asyncio.to_thread(self._queue.enqueue_render, request.render_id, params)
+        except PathEscapeError as exc:
+            return pb2.StartAnalysisResponse(accepted=False, error_code=pb2.ERROR_CODE_INVALID_PATH, error_message=str(exc))
+        except ValueError as exc:
+            return pb2.StartAnalysisResponse(accepted=False, error_code=pb2.ERROR_CODE_UNSPECIFIED, error_message=str(exc))
+        except Exception as exc:  # Redis down
+            log.error("enqueue_render_failed", render_id=request.render_id, error=str(exc))
+            return pb2.StartAnalysisResponse(
+                accepted=False, error_code=pb2.ERROR_CODE_QUEUE_UNAVAILABLE, error_message=str(exc)
+            )
+        return pb2.StartAnalysisResponse(accepted=True)
+
     async def StartExperiment(self, request, context):  # noqa: N802
         try:
             self._paths.resolve_artifacts(request.frames_path)
@@ -145,3 +217,15 @@ async def start_grpc_server(servicer: VideoAnalysisServicer, port: int) -> tuple
         raise RuntimeError(f"could not bind gRPC server to 127.0.0.1:{port}")
     await server.start()
     return server, bound_port
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except ValueError:
+        return False
+
+
+def _valid_clip(clip: dict) -> bool:
+    ok = _is_uuid(clip["clip_id"]) and all(math.isfinite(clip[k]) for k in ("start", "end"))
+    return ok and 0 <= clip["start"] < clip["end"]

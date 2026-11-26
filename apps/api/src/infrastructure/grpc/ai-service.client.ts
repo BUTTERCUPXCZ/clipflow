@@ -56,6 +56,26 @@ export interface StartAnalysisResult {
 
 export type AnalysisState = 'QUEUED' | 'RUNNING' | 'FINISHED' | 'UNKNOWN';
 
+export interface StartPlanningRequest {
+  planId: string;
+  transcriptPath: string;
+  visualPath: string;
+  outputPath: string;
+  durationSeconds: number;
+  minSeconds: number;
+  maxSeconds: number;
+  maxClips: number;
+  model: string;
+}
+
+export interface StartRenderingRequest {
+  renderId: string;
+  sourcePath: string;
+  outputPath: string;
+  subtitles: boolean;
+  clips: { clipId: string; start: number; end: number; cues: { start: number; end: number; text: string }[] }[];
+}
+
 export interface StartExperimentRequest {
   experimentId: string;
   framesPath: string;
@@ -72,6 +92,8 @@ interface VideoAnalysisServiceGrpc {
   cancelAnalysis(request: { jobId: string }): Observable<{ found: boolean }>;
   getAnalysisStatus(request: { jobId: string }): Observable<{ state: `ANALYSIS_STATE_${AnalysisState}` }>;
   startExperiment(request: StartExperimentRequest): Observable<StartAnalysisResult>;
+  startPlanning(request: StartPlanningRequest): Observable<StartAnalysisResult>;
+  startRendering(request: StartRenderingRequest): Observable<StartAnalysisResult>;
 }
 
 const DEADLINE_MS = 3000;
@@ -89,6 +111,8 @@ export interface AnalysisRunner {
   cancelAnalysis(jobId: string): Promise<boolean>;
   getAnalysisStatus(jobId: string): Promise<AnalysisState>;
   startExperiment(request: StartExperimentRequest): Promise<StartAnalysisResult>;
+  startPlanning(request: StartPlanningRequest): Promise<StartAnalysisResult>;
+  startRendering(request: StartRenderingRequest): Promise<StartAnalysisResult>;
   getModelStatus(): Promise<ModelStatus>;
 }
 
@@ -120,6 +144,14 @@ export class AiServiceClient implements OnModuleInit, MediaProbe, AnalysisRunner
 
   startExperiment(request: StartExperimentRequest): Promise<StartAnalysisResult> {
     return firstValueFrom(this.service.startExperiment(request).pipe(timeout(DEADLINE_MS)));
+  }
+
+  startPlanning(request: StartPlanningRequest): Promise<StartAnalysisResult> {
+    return firstValueFrom(this.service.startPlanning(request).pipe(timeout(DEADLINE_MS)));
+  }
+
+  startRendering(request: StartRenderingRequest): Promise<StartAnalysisResult> {
+    return firstValueFrom(this.service.startRendering(request).pipe(timeout(DEADLINE_MS)));
   }
 
   async getAnalysisStatus(jobId: string): Promise<AnalysisState> {

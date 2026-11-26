@@ -12,6 +12,16 @@ JOB_TIMEOUT_SECONDS = 6 * 3600  # a 30+ min video: Whisper on CPU + 60 frames on
 RESULT_TTL_SECONDS = 24 * 3600
 TASK = "app.jobs.task.process_video"
 EXPERIMENT_TASK = "app.jobs.task.run_experiment"
+PLAN_TASK = "app.jobs.task.plan_clips"
+RENDER_TASK = "app.jobs.task.render_clips"
+
+# Which event reports a failure for each kind of queued work (jobs, experiments and plans share the queue).
+# Ids are UUIDv4 from separate NestJS tables, so they never collide in RQ, the cancel flags or the sequences.
+_FAILURE_EVENTS = {EXPERIMENT_TASK: "experiment_failed", PLAN_TASK: "plan_failed", RENDER_TASK: "render_failed"}
+
+
+def report_failure(events, func_name: str, work_id: str, code: str, message: str) -> None:
+    getattr(events, _FAILURE_EVENTS.get(func_name, "failed"))(work_id, code, message)
 
 CANCEL_KEY = "clipforge:job-cancel:{job_id}"
 
@@ -83,6 +93,26 @@ class JobQueue:
     def workers_running(self) -> bool:
         return Worker.count(connection=self._redis) > 0
 
+    def enqueue_plan(self, plan_id: str, params: dict) -> None:
+        """`params`: the keyword arguments of app.jobs.task.plan_clips except plan_id. Same queue: one model at a time."""
+        self._enqueue(PLAN_TASK, plan_id, {"plan_id": plan_id, **params})
+
+    def enqueue_render(self, render_id: str, params: dict) -> None:
+        """`params`: the keyword arguments of app.jobs.task.render_clips except render_id (the GPU encoder is shared too)."""
+        self._enqueue(RENDER_TASK, render_id, {"render_id": render_id, **params})
+
+    def _enqueue(self, task: str, work_id: str, kwargs: dict) -> None:
+        if self._fetch(work_id) is not None:
+            return
+        self._queue.enqueue_call(
+            task,
+            kwargs=kwargs,
+            job_id=work_id,
+            timeout=JOB_TIMEOUT_SECONDS,
+            result_ttl=RESULT_TTL_SECONDS,
+            failure_ttl=RESULT_TTL_SECONDS,
+        )
+
     def cancel(self, job_id: str) -> bool:
         """Queued: dropped and reported CANCELLED here. Running: flagged; the worker stops and reports."""
         job = self._fetch(job_id)
@@ -91,10 +121,7 @@ class JobQueue:
         status = job.get_status(refresh=True)
         if status in (JobStatus.QUEUED, JobStatus.DEFERRED, JobStatus.SCHEDULED):
             job.cancel()
-            if job.func_name == EXPERIMENT_TASK:
-                self._events.experiment_failed(job_id, "CANCELLED", "Cancelled before it started")
-            else:
-                self._events.failed(job_id, "CANCELLED", "Cancelled before it started")
+            report_failure(self._events, job.func_name, job_id, "CANCELLED", "Cancelled before it started")
         elif status == JobStatus.STARTED:
             self._flags.request(job_id)
         return True

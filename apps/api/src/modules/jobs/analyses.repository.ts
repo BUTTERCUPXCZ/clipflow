@@ -17,6 +17,11 @@ export class AnalysesRepository {
     await this.db.insert(videoAnalyses).values(analysis).onConflictDoNothing({ target: videoAnalyses.processingJobId });
   }
 
+  async findByJob(processingJobId: string): Promise<VideoAnalysisRow | undefined> {
+    const [row] = await this.db.select().from(videoAnalyses).where(eq(videoAnalyses.processingJobId, processingJobId)).limit(1);
+    return row;
+  }
+
   async latestForVideo(userId: string, videoId: string): Promise<VideoAnalysisRow | undefined> {
     const [row] = await this.db
       .select()

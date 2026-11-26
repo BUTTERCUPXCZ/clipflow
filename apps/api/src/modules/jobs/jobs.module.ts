@@ -13,6 +13,6 @@ import { JobsService } from './jobs.service.js';
   imports: [VideosModule, GrpcModule],
   controllers: [JobsController, JobEventsController],
   providers: [JobsRepository, AnalysesRepository, JobsService, JobEventsHandler, JobsReconciler, EventsGateway],
-  exports: [JobsRepository, EventsGateway],
+  exports: [JobsRepository, AnalysesRepository, EventsGateway],
 })
 export class JobsModule {}

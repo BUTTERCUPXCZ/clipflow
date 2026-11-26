@@ -3,6 +3,8 @@ import { ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisCard } from "@/features/analysis/components/analysis-card";
 import { ExperimentsPanel } from "@/features/experiments/components/experiments-panel";
+import { ClipsCard } from "@/features/plans/components/clips-card";
+import { rendersApi } from "@/features/renders/api";
 import { JobStatusLine, ProcessingCard } from "@/features/jobs/components/processing-card";
 import { ResultsCard } from "@/features/jobs/components/results-card";
 import { useVideoJobs } from "@/features/jobs/queries";
@@ -53,6 +55,9 @@ export function VideoPage({ projectId, videoId }: { projectId: string; videoId: 
       <ProcessingCard video={video.data} latest={latest} />
       {completed && <ResultsCard job={completed} />}
       {completed && <AnalysisCard videoId={videoId} />}
+      {completed && !!video.data.duration && (
+        <ClipsCard videoId={videoId} durationSeconds={video.data.duration} jobs={jobs.data ?? []} />
+      )}
       <ExperimentsPanel videoId={videoId} canRun={completed !== undefined} />
       {jobs.data && jobs.data.length > 1 && (
         <Card>
@@ -88,7 +93,16 @@ function MetadataCard({ video }: { video: Video }) {
       <CardHeader>
         <CardTitle>Video</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="grid gap-4">
+        {video.status === "READY" && (
+          <video
+            src={rendersApi.sourceUrl(video.id)}
+            controls
+            preload="metadata"
+            aria-label={`Play ${video.filename}`}
+            className="aspect-video w-full max-w-2xl rounded border bg-black"
+          />
+        )}
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-5">
           {facts.map(([label, value]) => (
             <div key={label}>

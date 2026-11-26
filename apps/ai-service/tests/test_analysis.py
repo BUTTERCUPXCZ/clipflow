@@ -146,6 +146,9 @@ def test_ollama_reply_and_timings(tmp_path):
 def test_context_fits_the_images_and_the_answer():
     assert context_size(2, 500) == 3072  # 2×1100 + 256 + 500 = 2956
     assert context_size(4, 1000) == 6144  # Ollama's default 4096 was too small here
+    assert context_size(0, 600, "a" * 12000) == 5120  # text: 256 + 4000 + 600 = 4856
+    assert context_size(0, 100, "short") == 4096  # text calls never get less than Ollama's default
+    assert context_size(0, 500, "日本語" * 2000) == 7168  # 6000 + 256 + 500: each CJK char counted as a token
 
 
 def test_ollama_missing_model_and_down_runtime(tmp_path):
