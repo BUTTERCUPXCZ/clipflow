@@ -18,14 +18,68 @@ export interface ModelStatus {
   errorCode: 'ERROR_CODE_UNSPECIFIED' | 'ERROR_CODE_MODEL_RUNTIME_UNAVAILABLE';
 }
 
+type ErrorCode =
+  | 'ERROR_CODE_UNSPECIFIED'
+  | 'ERROR_CODE_MODEL_RUNTIME_UNAVAILABLE'
+  | 'ERROR_CODE_MEDIA_UNDECODABLE'
+  | 'ERROR_CODE_INVALID_PATH'
+  | 'ERROR_CODE_QUEUE_UNAVAILABLE';
+
+export interface ProbeResult {
+  decodable: boolean;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  frameRate: number;
+  videoCodec: string;
+  audioCodec: string;
+  hasAudio: boolean;
+  container: string;
+  errorCode: ErrorCode;
+  errorMessage: string;
+}
+
+export interface StartAnalysisRequest {
+  jobId: string;
+  storagePath: string;
+  artifactsPath: string;
+  settings: { frameIntervalSeconds: number; frameMaxWidth: number };
+}
+
+export interface StartAnalysisResult {
+  accepted: boolean;
+  errorCode: ErrorCode;
+  errorMessage: string;
+}
+
+export type AnalysisState = 'QUEUED' | 'RUNNING' | 'FINISHED' | 'UNKNOWN';
+
 interface VideoAnalysisServiceGrpc {
   getModelStatus(request: Record<string, never>): Observable<ModelStatus>;
+  probeVideo(request: { storagePath: string }): Observable<ProbeResult>;
+  startAnalysis(request: StartAnalysisRequest): Observable<StartAnalysisResult>;
+  cancelAnalysis(request: { jobId: string }): Observable<{ found: boolean }>;
+  getAnalysisStatus(request: { jobId: string }): Observable<{ state: `ANALYSIS_STATE_${AnalysisState}` }>;
 }
 
 const DEADLINE_MS = 3000;
+// ffprobe itself is bounded at 30 s in the AI service.
+const PROBE_DEADLINE_MS = 35_000;
+
+/** Only what video import needs (interface segregation): tests fake this, not the whole client. */
+export interface MediaProbe {
+  probeVideo(storagePath: string): Promise<ProbeResult>;
+}
+
+/** Only what processing jobs need from the AI service. */
+export interface AnalysisRunner {
+  startAnalysis(request: StartAnalysisRequest): Promise<StartAnalysisResult>;
+  cancelAnalysis(jobId: string): Promise<boolean>;
+  getAnalysisStatus(jobId: string): Promise<AnalysisState>;
+}
 
 @Injectable()
-export class AiServiceClient implements OnModuleInit {
+export class AiServiceClient implements OnModuleInit, MediaProbe, AnalysisRunner {
   private service!: VideoAnalysisServiceGrpc;
 
   constructor(@Inject(AI_SERVICE_GRPC) private readonly client: ClientGrpc) {}
@@ -36,5 +90,22 @@ export class AiServiceClient implements OnModuleInit {
 
   getModelStatus(): Promise<ModelStatus> {
     return firstValueFrom(this.service.getModelStatus({}).pipe(timeout(DEADLINE_MS)));
+  }
+
+  probeVideo(storagePath: string): Promise<ProbeResult> {
+    return firstValueFrom(this.service.probeVideo({ storagePath }).pipe(timeout(PROBE_DEADLINE_MS)));
+  }
+
+  startAnalysis(request: StartAnalysisRequest): Promise<StartAnalysisResult> {
+    return firstValueFrom(this.service.startAnalysis(request).pipe(timeout(DEADLINE_MS)));
+  }
+
+  async cancelAnalysis(jobId: string): Promise<boolean> {
+    return (await firstValueFrom(this.service.cancelAnalysis({ jobId }).pipe(timeout(DEADLINE_MS)))).found;
+  }
+
+  async getAnalysisStatus(jobId: string): Promise<AnalysisState> {
+    const { state } = await firstValueFrom(this.service.getAnalysisStatus({ jobId }).pipe(timeout(DEADLINE_MS)));
+    return state.replace('ANALYSIS_STATE_', '') as AnalysisState;
   }
 }

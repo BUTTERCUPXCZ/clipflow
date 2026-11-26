@@ -1,17 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   type OnApplicationBootstrap,
 } from '@nestjs/common';
+import type { MediaProbe } from '../../infrastructure/grpc/ai-service.client.js';
+import { MEDIA_PROBE } from '../../infrastructure/grpc/grpc.module.js';
 import { MediaStorage } from '../../infrastructure/storage/media-storage.js';
 import { ProjectsRepository } from '../projects/projects.repository.js';
 import { ImportRegistry } from './import/import-registry.js';
 import { ImportRejectedError, ImportValidator, type ValidatedFile } from './import/import-validator.js';
 import { MediaCopier } from './import/media-copier.js';
-import { toVideo, type Video, type VideoRecord, VideosRepository } from './videos.repository.js';
+import { toVideo, type Video, type VideoMetadata, type VideoRecord, VideosRepository } from './videos.repository.js';
+
+type ProbeOutcome = { kind: 'ok'; metadata: VideoMetadata } | { kind: 'undecodable'; reason: string } | { kind: 'unknown' };
 
 export const INTERRUPTED_MESSAGE = 'Import interrupted. Import the file again';
 
@@ -31,6 +36,7 @@ export class VideosService implements OnApplicationBootstrap {
     private readonly validator: ImportValidator,
     private readonly copier: MediaCopier,
     private readonly registry: ImportRegistry,
+    @Inject(MEDIA_PROBE) private readonly mediaProbe: MediaProbe,
   ) {}
 
   async startImport(userId: string, projectId: string, path: string): Promise<Video> {
@@ -100,8 +106,7 @@ export class VideosService implements OnApplicationBootstrap {
         signal,
         onProgress: (bytes) => this.reportProgress(record.id, bytes),
       });
-      // false: the video was deleted while the last bytes were written.
-      if (!(await this.videos.markReady(record.id, file.size))) await this.removeFiles(record);
+      await this.finishImport(record, file);
     } catch (error) {
       if (!signal.aborted) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -112,6 +117,46 @@ export class VideosService implements OnApplicationBootstrap {
     } finally {
       this.registry.finish(record.id);
     }
+  }
+
+  /** Probe before READY, so the video appears with its metadata or is rejected as unplayable. */
+  private async finishImport(record: VideoRecord, file: ValidatedFile): Promise<void> {
+    const probe = await this.probe(record);
+    if (probe.kind === 'undecodable') {
+      await this.videos.markFailed(record.id, `Not a playable video: ${probe.reason}`);
+      await this.removeFiles(record);
+      return;
+    }
+    const metadata = probe.kind === 'ok' ? probe.metadata : {};
+    // false: the video was deleted while the last bytes were written or probed.
+    if (!(await this.videos.markReady(record.id, file.size, metadata))) await this.removeFiles(record);
+  }
+
+  /** An unreachable AI service is not the file's fault: the video becomes READY without metadata. */
+  private async probe(record: VideoRecord): Promise<ProbeOutcome> {
+    try {
+      const result = await this.mediaProbe.probeVideo(record.storagePath);
+      if (result.decodable) {
+        return {
+          kind: 'ok',
+          metadata: {
+            duration: result.durationSeconds,
+            width: result.width,
+            height: result.height,
+            frameRate: result.frameRate,
+            videoCodec: result.videoCodec,
+            audioCodec: result.audioCodec || null,
+            hasAudio: result.hasAudio,
+            container: result.container,
+          },
+        };
+      }
+      if (result.errorCode === 'ERROR_CODE_MEDIA_UNDECODABLE') return { kind: 'undecodable', reason: result.errorMessage };
+      this.logger.error(`probe of ${record.id} failed: ${result.errorCode} ${result.errorMessage}`);
+    } catch (error) {
+      this.logger.warn(`AI service unavailable, ${record.id} stays without metadata: ${String(error)}`);
+    }
+    return { kind: 'unknown' };
   }
 
   private async reportProgress(id: string, bytes: number): Promise<void> {

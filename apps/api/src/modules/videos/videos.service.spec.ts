@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TEXT_HEADER } from '../../../test/fixtures/containers.js';
-import { VideosHarness } from '../../../test/videos-harness.js';
+import { PLAYABLE, VideosHarness } from '../../../test/videos-harness.js';
 import { LOCAL_USER_ID } from '../../common/current-user.js';
 import { MediaCopier } from './import/media-copier.js';
 
@@ -31,6 +31,51 @@ describe('VideosService: import, list, get (clipforge_test)', () => {
 
     const stored = h.storage.absolute(h.storage.sourceVideoPath(LOCAL_USER_ID, projectId, started.id, 'mp4'));
     expect((await readFile(stored)).equals(await readFile(source))).toBe(true);
+  });
+
+  it('stores what FFprobe found when the video becomes READY', async () => {
+    const service = h.service();
+    const projectId = await h.project();
+
+    const video = await service.startImport(LOCAL_USER_ID, projectId, await h.sourceFile());
+    await service.drain();
+
+    expect(await service.get(LOCAL_USER_ID, video.id)).toMatchObject({
+      status: 'READY',
+      duration: 761.4,
+      width: 1920,
+      height: 1080,
+      frameRate: 29.97,
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      hasAudio: true,
+    });
+  });
+
+  it('fails an undecodable file as "Not a playable video" and removes it', async () => {
+    const service = h.service();
+    h.probe.answer = { ...PLAYABLE, decodable: false, errorCode: 'ERROR_CODE_MEDIA_UNDECODABLE', errorMessage: 'moov atom not found' };
+    const projectId = await h.project();
+
+    const video = await service.startImport(LOCAL_USER_ID, projectId, await h.sourceFile());
+    await service.drain();
+
+    expect(await service.get(LOCAL_USER_ID, video.id)).toMatchObject({
+      status: 'FAILED',
+      errorMessage: 'Not a playable video: moov atom not found',
+    });
+    await expect(stat(h.storage.videoDir(LOCAL_USER_ID, projectId, video.id))).rejects.toThrow();
+  });
+
+  it('still becomes READY, without metadata, when the AI service is down', async () => {
+    const service = h.service();
+    h.probe.answer = new Error('14 UNAVAILABLE');
+    const projectId = await h.project();
+
+    const video = await service.startImport(LOCAL_USER_ID, projectId, await h.sourceFile());
+    await service.drain();
+
+    expect(await service.get(LOCAL_USER_ID, video.id)).toMatchObject({ status: 'READY', duration: null, hasAudio: null });
   });
 
   it('rejects an invalid file with 400 and creates nothing', async () => {

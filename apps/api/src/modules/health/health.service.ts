@@ -13,7 +13,12 @@ export class HealthService {
 
   async check(): Promise<HealthReport> {
     const results = await Promise.all(this.indicators.map((indicator) => indicator.check()));
-    const checks = Object.assign({}, ...results) as Record<string, Check>;
+    const checks: Record<string, Check> = {};
+    for (const [name, check] of results.flatMap((result) => Object.entries(result))) {
+      // Two indicators claiming one name would silently hide a failure.
+      if (name in checks) throw new Error(`duplicate health check name: ${name}`);
+      checks[name] = check;
+    }
     const healthy = Object.values(checks).every((c) => c.status === 'ok');
     return { status: healthy ? 'ok' : 'error', checks };
   }

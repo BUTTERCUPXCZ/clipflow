@@ -79,6 +79,7 @@ describe('VideosService: delete, abort, recovery (clipforge_test)', () => {
       new ImportValidator(h.storage),
       new MediaCopier(0),
       h.registry,
+      h.probe,
     );
     const projectId = await h.project();
 
@@ -95,6 +96,25 @@ describe('VideosService: delete, abort, recovery (clipforge_test)', () => {
     }
 
     expect(unhandled).toEqual([]);
+  });
+
+  it('removes the finished file when the video was deleted between the final rename and READY', async () => {
+    let videoId = '';
+    class DeleteAfterRename extends MediaCopier {
+      override async copy(...args: Parameters<MediaCopier['copy']>): Promise<void> {
+        await super.copy(...args);
+        await h.videos.deleteOwned(LOCAL_USER_ID, videoId); // the user deleted it just now
+      }
+    }
+    const service = h.service(new DeleteAfterRename(0));
+    const projectId = await h.project();
+    await h.project(); // a second project keeps the user directory around
+    const video = await service.startImport(LOCAL_USER_ID, projectId, await h.sourceFile());
+    videoId = video.id;
+
+    await service.drain();
+
+    expect(await exists(h.storage.videoDir(LOCAL_USER_ID, projectId, video.id))).toBe(false);
   });
 
   it('404s when deleting an unknown video', async () => {

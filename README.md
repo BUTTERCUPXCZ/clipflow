@@ -6,7 +6,7 @@ ClipForge AI is a desktop app for content creators. You import a long video (a p
 
 Everything runs locally. Speech recognition, visual understanding and rendering all happen on your computer, so you need no cloud account or paid AI API, and your footage never leaves your machine.
 
-> **Status:** Phases 1–2 are complete. You can create projects and import local videos into them: every common video format is supported, files are validated and copied in the background with live progress, and interrupted imports recover cleanly. Analysis and rendering arrive in Phases 3–6. See the [roadmap](#roadmap).
+> **Status:** Phases 1–3 are complete. You can create projects, import videos (validated, copied, and inspected with FFprobe), and **process** them: a background worker extracts a speech-ready audio track and one frame per second, with live progress over a WebSocket, cancel, and crash recovery. AI analysis and rendering arrive in Phases 4–6. See the [roadmap](#roadmap).
 
 ---
 
@@ -117,8 +117,9 @@ Adjust the port to match your cluster (`pg_lsclusters`), here and in `DATABASE_U
 ### Run (three terminals)
 
 ```bash
-npm run dev:ai        # AI service: HTTP :8000 (/health), gRPC :50051
-npm run dev:api       # API: http://localhost:3000/api/v1/health
+npm run dev:ai        # AI service (HTTP :8000, gRPC :50051) + processing worker (RQ)
+                      # (npm run dev:worker runs the worker alone)
+npm run dev:api       # API: http://localhost:3000/api/v1, WebSocket /ws, job events gRPC :50052
 npm run dev:desktop   # opens the ClipForge window
 ```
 
@@ -140,8 +141,8 @@ npm run build         # desktop + api
 |---|---|---|
 | 1 | Application foundation: all services running and talking | ✅ Done |
 | 2 | Projects and video import | ✅ Done |
-| 3 | Media processing: FFprobe, audio and frame extraction, job queue | Next |
-| 4 | Local AI: transcription and visual analysis, model experiments | Planned |
+| 3 | Media processing: FFprobe, audio and frame extraction, job queue | ✅ Done |
+| 4 | Local AI: transcription and visual analysis, model experiments | Next |
 | 5 | AI editing planner: highlights, clip boundaries, validated plans | Planned |
 | 6 | Automatic rendering: 9:16, subtitles, thumbnails | Planned |
 | 7 | Complete desktop experience: progress, gallery, preview, export | Planned |

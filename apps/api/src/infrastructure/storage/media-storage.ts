@@ -1,4 +1,4 @@
-import { mkdir, realpath, rm, statfs } from 'node:fs/promises';
+import { mkdir, realpath, rm, rmdir, statfs } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
@@ -7,6 +7,9 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
  */
 export class MediaStorage {
   static readonly ORIGINALS = 'original-videos';
+  /** Extracted audio + frames per processing job (Phase 3; replaces the docs' temporary /tmp idea). */
+  static readonly ANALYSIS = 'analysis';
+  private static readonly TREES = [MediaStorage.ORIGINALS, MediaStorage.ANALYSIS];
 
   readonly root: string;
 
@@ -17,6 +20,11 @@ export class MediaStorage {
   /** original-videos/{user}/{project}/{video}/source.{ext} — relative, for the storage_path column. */
   sourceVideoPath(userId: string, projectId: string, videoId: string, extension: string): string {
     return join(MediaStorage.ORIGINALS, userId, projectId, videoId, `source.${extension}`);
+  }
+
+  /** analysis/{user}/{project}/{video}/{job} — relative; where the worker writes audio.wav and frames/. */
+  jobArtifactsPath(userId: string, projectId: string, videoId: string, jobId: string): string {
+    return join(MediaStorage.ANALYSIS, userId, projectId, videoId, jobId);
   }
 
   /** Absolute path for a stored relative path. Refuses anything that would escape MEDIA_ROOT. */
@@ -34,12 +42,24 @@ export class MediaStorage {
     return this.absolute(join(MediaStorage.ORIGINALS, userId, projectId, videoId));
   }
 
+  /** Removes everything ClipForge stored for the project: its originals and its analysis artifacts. */
   async removeProjectDir(userId: string, projectId: string): Promise<void> {
-    await rm(this.projectDir(userId, projectId), { recursive: true, force: true });
+    for (const tree of MediaStorage.TREES) {
+      await rm(this.absolute(join(tree, userId, projectId)), { recursive: true, force: true });
+    }
   }
 
+  /**
+   * Removes the video's original and analysis artifacts, then any project directory this left empty
+   * (e.g. a copy racing a project delete).
+   */
   async removeVideoDir(userId: string, projectId: string, videoId: string): Promise<void> {
-    await rm(this.videoDir(userId, projectId, videoId), { recursive: true, force: true });
+    for (const tree of MediaStorage.TREES) {
+      await rm(this.absolute(join(tree, userId, projectId, videoId)), { recursive: true, force: true });
+      await rmdir(this.absolute(join(tree, userId, projectId))).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOTEMPTY' && error.code !== 'ENOENT' && error.code !== 'EEXIST') throw error;
+      });
+    }
   }
 
   async freeBytes(): Promise<number> {

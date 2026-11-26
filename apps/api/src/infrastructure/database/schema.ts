@@ -2,13 +2,16 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   check,
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -57,11 +60,15 @@ export const sourceVideos = pgTable(
     mimeType: text('mime_type').notNull(),
     status: text('status', { enum: VIDEO_STATUSES }).notNull(),
     errorMessage: text('error_message'),
-    // Filled by FFprobe in Phase 3.
+    // Filled by FFprobe (ProbeVideo) when the copy finishes; NULL if the AI service was unavailable then.
     duration: doublePrecision('duration'),
     width: integer('width'),
     height: integer('height'),
     frameRate: doublePrecision('frame_rate'),
+    videoCodec: text('video_codec'),
+    audioCodec: text('audio_codec'),
+    hasAudio: boolean('has_audio'),
+    container: text('container'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -71,6 +78,61 @@ export const sourceVideos = pgTable(
   ],
 );
 
+export const JOB_STATUSES = ['PENDING', 'VALIDATING', 'EXTRACTING_MEDIA', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+export const TERMINAL_JOB_STATUSES: readonly JobStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED'];
+
+/** Relative paths (MEDIA_ROOT) to what a completed Phase 3 job produced. */
+export interface JobArtifacts {
+  hasAudio: boolean;
+  audioPath: string | null;
+  audioDurationSeconds: number | null;
+  frameCount: number;
+  frameIntervalSeconds: number;
+  framesPath: string;
+}
+
+export const processingJobs = pgTable(
+  'processing_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceVideoId: uuid('source_video_id')
+      .notNull()
+      .references(() => sourceVideos.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: JOB_STATUSES }).notNull(),
+    stage: text('stage').notNull(),
+    progress: integer('progress').notNull().default(0),
+    message: text('message'),
+    // Highest event sequence applied; older or repeated events from the worker are ignored.
+    lastSequence: integer('last_sequence').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    artifacts: jsonb('artifacts').$type<JobArtifacts>(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('processing_jobs_source_video_id_idx').on(t.sourceVideoId),
+    index('processing_jobs_status_idx').on(t.status),
+    // At most one active job per video, enforced by the database (two concurrent POST /process calls).
+    uniqueIndex('processing_jobs_one_active_per_video')
+      .on(t.sourceVideoId)
+      .where(sql`status in ('PENDING', 'VALIDATING', 'EXTRACTING_MEDIA')`),
+    check(
+      'processing_jobs_status_check',
+      sql`${t.status} in ('PENDING', 'VALIDATING', 'EXTRACTING_MEDIA', 'COMPLETED', 'FAILED', 'CANCELLED')`,
+    ),
+    check('processing_jobs_progress_check', sql`${t.progress} between 0 and 100`),
+  ],
+);
+
+export type ProcessingJobRow = typeof processingJobs.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type SourceVideoRow = typeof sourceVideos.$inferSelect;
 export type NewSourceVideoRow = typeof sourceVideos.$inferInsert;

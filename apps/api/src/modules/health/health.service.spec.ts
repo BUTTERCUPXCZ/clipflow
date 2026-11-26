@@ -16,6 +16,12 @@ describe('HealthService', () => {
     expect(Object.keys(report.checks)).toEqual(['a', 'b', 'c']);
   });
 
+  it('refuses two indicators reporting the same name', async () => {
+    const service = new HealthService([indicator({ a: ok('1') }), indicator({ a: error('hidden') })]);
+
+    await expect(service.check()).rejects.toThrow('duplicate health check name: a');
+  });
+
   it('is unhealthy when any indicator reports an error', async () => {
     const service = new HealthService([indicator({ a: ok('1') }), indicator({ b: error('down') })]);
 

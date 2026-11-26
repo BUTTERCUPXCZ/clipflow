@@ -9,6 +9,7 @@ import { ImportValidator } from '../src/modules/videos/import/import-validator.j
 import { type CopyOptions, MediaCopier } from '../src/modules/videos/import/media-copier.js';
 import { VideosRepository } from '../src/modules/videos/videos.repository.js';
 import { VideosService } from '../src/modules/videos/videos.service.js';
+import type { MediaProbe, ProbeResult } from '../src/infrastructure/grpc/ai-service.client.js';
 import { FIXTURE_HEADERS } from './fixtures/containers.js';
 import { TestDatabase } from './test-database.js';
 
@@ -40,6 +41,29 @@ export class GatedCopier extends MediaCopier {
   }
 }
 
+export const PLAYABLE: ProbeResult = {
+  decodable: true,
+  durationSeconds: 761.4,
+  width: 1920,
+  height: 1080,
+  frameRate: 29.97,
+  videoCodec: 'h264',
+  audioCodec: 'aac',
+  hasAudio: true,
+  container: 'mov,mp4,m4a,3gp,3g2,mj2',
+  errorCode: 'ERROR_CODE_UNSPECIFIED',
+  errorMessage: '',
+};
+
+/** A MediaProbe whose answer the test sets (or a thrown error, to simulate the AI service being down). */
+export class FakeProbe implements MediaProbe {
+  answer: ProbeResult | Error = PLAYABLE;
+
+  probeVideo(): Promise<ProbeResult> {
+    return this.answer instanceof Error ? Promise.reject(this.answer) : Promise.resolve(this.answer);
+  }
+}
+
 /** Real repositories (clipforge_test), real validator and storage on a temp MEDIA_ROOT. */
 export class VideosHarness {
   readonly database = new TestDatabase();
@@ -48,12 +72,14 @@ export class VideosHarness {
   dir = '';
   storage!: MediaStorage;
   registry!: ImportRegistry;
+  probe = new FakeProbe();
 
   async setUp(): Promise<void> {
     await this.database.reset();
     this.dir = await mkdtemp(join(tmpdir(), 'clipforge-videos-'));
     this.storage = new MediaStorage(join(this.dir, 'media'));
     this.registry = new ImportRegistry();
+    this.probe = new FakeProbe();
   }
 
   async tearDown(): Promise<void> {
@@ -61,7 +87,15 @@ export class VideosHarness {
   }
 
   service(copier: MediaCopier = new MediaCopier(0)): VideosService {
-    return new VideosService(this.videos, this.projects, this.storage, new ImportValidator(this.storage), copier, this.registry);
+    return new VideosService(
+      this.videos,
+      this.projects,
+      this.storage,
+      new ImportValidator(this.storage),
+      copier,
+      this.registry,
+      this.probe,
+    );
   }
 
   async project(userId = LOCAL_USER_ID): Promise<string> {

@@ -11,9 +11,10 @@
   "scripts": {
     "dev:api": "npm run start:dev -w apps/api",
     "dev:desktop": "npm run tauri dev -w apps/desktop",
-    "dev:ai": "cd apps/ai-service && uv run python -m app.main",
+    "dev:ai": "cd apps/ai-service && (uv run python -m app.workers.processing_worker & uv run python -m app.main)",
     "test": "npm run check:lines && npm test -ws --if-present && cd apps/ai-service && uv run pytest",
     "check:lines": "node scripts/check-lines.mjs",
-    "build": "npm run build -ws --if-present"
+    "build": "npm run build -ws --if-present",
+    "dev:worker": "cd apps/ai-service && uv run python -m app.workers.processing_worker"
   }
 }

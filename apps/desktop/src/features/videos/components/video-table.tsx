@@ -1,7 +1,8 @@
+import { Link } from "@tanstack/react-router";
 import { Film } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Video } from "../api";
-import { formatBytes, formatDuration, formatResolution } from "../format";
+import { formatBytes, formatCodecs, formatDuration, formatResolution } from "../format";
 import { useDeleteVideo, useVideos } from "../queries";
 import { DeleteVideoDialog } from "./delete-video-dialog";
 import { VideoStatus } from "./video-status";
@@ -36,6 +37,7 @@ export function VideoTable({ projectId }: { projectId: string }) {
           <TableHead>Status</TableHead>
           <TableHead className="text-right">Duration</TableHead>
           <TableHead className="text-right">Resolution</TableHead>
+          <TableHead>Codecs</TableHead>
           <TableHead>
             <span className="sr-only">Actions</span>
           </TableHead>
@@ -54,7 +56,17 @@ function VideoRow({ video, onDelete }: { video: Video; onDelete: () => Promise<u
   return (
     <TableRow>
       <TableCell className="max-w-72 truncate font-medium" title={video.filename}>
-        {video.filename}
+        {video.status === "IMPORTING" ? (
+          video.filename
+        ) : (
+          <Link
+            to="/projects/$projectId/videos/$videoId"
+            params={{ projectId: video.projectId, videoId: video.id }}
+            className="hover:underline underline-offset-4"
+          >
+            {video.filename}
+          </Link>
+        )}
       </TableCell>
       <TableCell className="text-right tabular-nums">{formatBytes(video.fileSize)}</TableCell>
       <TableCell>
@@ -62,6 +74,7 @@ function VideoRow({ video, onDelete }: { video: Video; onDelete: () => Promise<u
       </TableCell>
       <TableCell className="text-right tabular-nums">{formatDuration(video.duration)}</TableCell>
       <TableCell className="text-right tabular-nums">{formatResolution(video.width, video.height)}</TableCell>
+      <TableCell className="whitespace-nowrap">{formatCodecs(video)}</TableCell>
       <TableCell className="text-right">
         <DeleteVideoDialog video={video} onConfirm={onDelete} />
       </TableCell>

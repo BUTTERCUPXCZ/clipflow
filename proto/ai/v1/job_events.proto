@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package ai.v1;
+
+// Internal contract: Python worker (client) -> NestJS (server). NestJS is the only database writer;
+// it persists these events and forwards them to the desktop over WebSocket.
+// Every event carries a per-job sequence number that only grows; NestJS ignores an event whose
+// sequence is not greater than the last one applied, and any event for a finished job.
+service JobEventsService {
+  rpc ReportProgress(ReportProgressRequest) returns (ReportAck);
+  rpc ReportCompletion(ReportCompletionRequest) returns (ReportAck);
+  rpc ReportFailure(ReportFailureRequest) returns (ReportAck);
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_VALIDATING = 1;
+  JOB_STATUS_EXTRACTING_MEDIA = 2;
+}
+
+enum JobErrorCode {
+  JOB_ERROR_CODE_UNSPECIFIED = 0;
+  JOB_ERROR_CODE_MEDIA_UNDECODABLE = 1;
+  JOB_ERROR_CODE_FFMPEG_FAILED = 2;
+  JOB_ERROR_CODE_INTERRUPTED = 3;
+  JOB_ERROR_CODE_CANCELLED = 4;
+  JOB_ERROR_CODE_INTERNAL = 5;
+}
+
+message ReportProgressRequest {
+  string job_id = 1;
+  int64 sequence = 2;
+  JobStatus status = 3;
+  string stage = 4;     // human-readable, e.g. "Extracting audio and frames"
+  int32 progress = 5;   // 0-100
+  string message = 6;
+}
+
+message JobArtifacts {
+  bool has_audio = 1;
+  string audio_path = 2;  // relative to MEDIA_ROOT; empty without audio
+  double audio_duration_seconds = 3;
+  int32 frame_count = 4;
+  double frame_interval_seconds = 5;
+  string frames_path = 6; // relative directory holding frame-000001.jpg ... and frames.json
+}
+
+message ReportCompletionRequest {
+  string job_id = 1;
+  int64 sequence = 2;
+  JobArtifacts artifacts = 3;
+}
+
+message ReportFailureRequest {
+  string job_id = 1;
+  int64 sequence = 2;
+  JobErrorCode error_code = 3;
+  string error_message = 4;
+}
+
+message ReportAck {
+  bool applied = 1;  // false: duplicate, out of order, or the job already finished
+  // true when the job no longer exists or is already finished/cancelled (e.g. its video was deleted):
+  // the worker must stop and clean up. Lets deletes cancel work without coupling modules.
+  bool stop = 2;
+}

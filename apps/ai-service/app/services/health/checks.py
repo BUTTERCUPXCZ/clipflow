@@ -35,7 +35,10 @@ class RedisCheck:
         return {"redis": await self._probe()}
 
     async def _probe(self) -> Check:
-        client = redis.from_url(self._url, socket_timeout=2, socket_connect_timeout=2, decode_responses=True)
+        try:
+            client = redis.from_url(self._url, socket_timeout=2, socket_connect_timeout=2, decode_responses=True)
+        except ValueError as exc:  # malformed REDIS_URL; a health check must report, never raise
+            return error(f"invalid REDIS_URL: {exc}")
         try:
             await client.ping()
             appendonly = (await client.config_get("appendonly")).get("appendonly")

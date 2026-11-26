@@ -5,11 +5,17 @@ import httpx
 import structlog
 import uvicorn
 from fastapi import FastAPI
+from redis import Redis
 
 from app.api.routes import health
 from app.config import Settings
 from app.grpc_server import VideoAnalysisServicer, start_grpc_server
+from app.jobs.events import JobEventsClient
+from app.jobs.queue import CancellationFlags, JobQueue
 from app.logging_config import configure_logging
+from app.media.ffmpeg_runner import FfmpegRunner
+from app.media.media_paths import MediaPaths
+from app.media.prober import MediaProber
 from app.services.health import FfmpegCheck, HealthService, MediaRootCheck, ModelRuntimeCheck, RedisCheck
 from app.services.model_runtime import ModelRuntime, OllamaRuntime
 
@@ -28,6 +34,18 @@ def build_health_service(settings: Settings, runtime: ModelRuntime) -> HealthSer
     )
 
 
+def build_servicer(settings: Settings, runtime: ModelRuntime, redis: Redis) -> VideoAnalysisServicer:
+    """Composition root for gRPC: media probing plus the RQ job queue."""
+    events = JobEventsClient(settings.job_events_grpc_url, redis)
+    return VideoAnalysisServicer(
+        runtime,
+        settings.vision_model,
+        paths=MediaPaths(settings.media_root),
+        prober=MediaProber(FfmpegRunner()),
+        queue=JobQueue(redis, CancellationFlags(redis), events),
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
 
@@ -39,7 +57,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=1.0) as ollama:
             runtime = OllamaRuntime(ollama)
             app.state.health = build_health_service(settings, runtime)
-            servicer = VideoAnalysisServicer(runtime, settings.vision_model)
+            redis = Redis.from_url(settings.redis_url)
+            servicer = build_servicer(settings, runtime, redis)
             grpc_server, grpc_port = await start_grpc_server(servicer, settings.ai_grpc_port)
             app.state.grpc_port = grpc_port
             log.info("ai_service_started", http_port=settings.ai_http_port, grpc_port=grpc_port)
@@ -47,6 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield
             finally:
                 await grpc_server.stop(grace=5)
+                redis.close()
                 log.info("ai_service_stopped")
 
     app = FastAPI(title="ClipForge AI Service", lifespan=lifespan)

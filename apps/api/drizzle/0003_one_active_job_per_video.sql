@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "processing_jobs_one_active_per_video" ON "processing_jobs" USING btree ("source_video_id") WHERE status in ('PENDING', 'VALIDATING', 'EXTRACTING_MEDIA');

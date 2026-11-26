@@ -12,6 +12,11 @@ class HealthService:
 
     async def report(self) -> HealthReport:
         results = await asyncio.gather(*(check.run() for check in self._checks))
-        checks = {name: check for result in results for name, check in result.items()}
+        checks: dict = {}
+        for result in results:
+            for name, check in result.items():
+                if name in checks:  # two checks claiming one name would silently hide a failure
+                    raise RuntimeError(f"duplicate health check name: {name}")
+                checks[name] = check
         healthy = all(c.status == "ok" for c in checks.values())
         return HealthReport(status="ok" if healthy else "error", checks=checks)

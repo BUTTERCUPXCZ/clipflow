@@ -492,6 +492,12 @@ apps/ai-service/
 
 The FastAPI application provides health checks and experiment endpoints. The gRPC server handles internal commands and enqueues jobs. The RQ worker executes long-running jobs.
 
+As built in Phase 3:
+- `app/media/` (`MediaPaths`, `FfmpegRunner`, `MediaProber`, extractors) is the only code that touches FFmpeg. It uses argument lists with no shell, its own process group, and cancellation.
+- `app/jobs/` holds `JobQueue` (RQ), `JobEventsClient` (gRPC to NestJS), `ProcessingPipeline` and the RQ task.
+- `app/workers/processing_worker.py` is the worker entry point, and runs crash recovery at startup.
+- On the NestJS side, `modules/jobs/` holds the REST endpoints, the `JobEventsService` gRPC server, the `/ws` WebSocket gateway and the startup reconciler.
+
 Keep model inference, workflow orchestration, and rendering as separate modules even if they initially run in the same Python service.
 
 ---

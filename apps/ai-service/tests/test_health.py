@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -25,6 +26,13 @@ async def test_service_merges_results_of_every_check():
 
     assert report.healthy
     assert set(report.checks) == {"a", "b", "c"}
+
+
+async def test_service_refuses_duplicate_check_names():
+    service = HealthService([StaticCheck(redis=ok("1")), StaticCheck(redis=error("hidden"))])
+
+    with pytest.raises(RuntimeError, match="duplicate health check name: redis"):
+        await service.report()
 
 
 async def test_service_is_unhealthy_when_any_check_fails():

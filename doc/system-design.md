@@ -188,7 +188,7 @@ A source video record that goes `IMPORTING` → `READY`, or `FAILED` with an `er
 
 ## 4.2 Step 2 — Validate Video
 
-Before processing, Python uses FFprobe to inspect the file.
+Python inspects every file with FFprobe as soon as its import copy finishes (gRPC `ProbeVideo`, called by NestJS before the video becomes `READY`), and again in the `VALIDATING` stage of every processing job. The result is stored on `source_videos` (duration, width, height, frame rate, video/audio codec, has-audio, container). An undecodable file ends the import as `FAILED: "Not a playable video: …"`. If the AI service is unavailable at import time, the video still becomes `READY` without metadata. FFmpeg error messages are cleaned before they leave the AI service: file names only, never absolute paths or internal `[demuxer @ 0x…]` prefixes.
 
 Collect:
 
@@ -571,6 +571,13 @@ Example:
 
 Progress values should represent estimated stage completion rather than pretending to know the exact remaining inference time.
 
+Phase 3 bands:
+- `VALIDATING` is 0–5.
+- `EXTRACTING_MEDIA` runs 5–30 for audio and 30–99 for frames, computed from FFmpeg's `-progress` output against the probed duration and sent only when the integer percentage changes, at most every 0.5 s.
+- `COMPLETED` is 100.
+
+The `processing_jobs.status` CHECK covers only `PENDING`, `VALIDATING`, `EXTRACTING_MEDIA`, `COMPLETED`, `FAILED` and `CANCELLED`. Later phases widen it with their own migration.
+
 ---
 
 # 6. API Design
@@ -606,7 +613,10 @@ Base path:
 | POST | `/videos/:id/process` | Start processing |
 | GET | `/jobs/:id` | Get job status |
 | POST | `/jobs/:id/cancel` | Cancel job |
-| GET | `/videos/:id/jobs` | List video jobs |
+| GET | `/videos/:id/jobs` | List video jobs (newest first) |
+| GET | `/jobs/:id/frames` | Frame index of a completed job: `[{index, timestampSeconds}]` |
+| GET | `/jobs/:id/frames/:index` | One frame, `image/jpeg` |
+| WS | `/ws` | Server → desktop `job.updated` events (Origin-checked) |
 
 ## 6.4 Generated Clips
 
@@ -680,7 +690,7 @@ Every event carries the processing job ID and a monotonically increasing sequenc
 
 If NestJS is unreachable, the worker retries with backoff. An RQ job is finished only after NestJS acknowledges its completion or failure event.
 
-The full message definitions should be implemented in a versioned `.proto` file.
+The full message definitions live in `proto/ai/v1/video_analysis.proto` (`GetModelStatus`, `ProbeVideo`, `StartAnalysis`, `CancelAnalysis`, `GetAnalysisStatus`) and `proto/ai/v1/job_events.proto` (`ReportProgress`, `ReportCompletion`, `ReportFailure`, each returning `ReportAck {applied, stop}`). Media paths in every message are relative to `MEDIA_ROOT`, and the AI service rejects any path that escapes it.
 
 Important rules:
 
@@ -981,7 +991,16 @@ The actual rendering resolution should be configurable because hardware performa
 
 ## 11.2 Temporary Files
 
-Use a per-job temporary directory:
+Phase 3 keeps a job's artifacts instead of using a temporary directory, because Phase 4 analyses them and the app shows them:
+
+```text
+MEDIA_ROOT/analysis/{user}/{project}/{video}/{job}/
+    audio.wav            16 kHz mono PCM (absent when the video has no audio track)
+    frames/frame-000001.jpg …  one per FRAME_SAMPLE_INTERVAL s, at most FRAME_MAX_WIDTH px wide
+    frames/frames.json   [{index, file, timestampSeconds}]
+```
+
+A failed or cancelled job's directory is removed by the worker. Deleting a video or project removes its `analysis/` subtree with its originals. The original temporary-directory sketch, kept for later stages that need scratch space:
 
 ```text
 /tmp/clipforge/
@@ -1004,7 +1023,7 @@ On failure, preserve diagnostic logs and enough metadata to reproduce the proble
 
 The desktop needs to display job progress.
 
-Use WebSocket notifications from NestJS.
+Use WebSocket notifications from NestJS: `ws://localhost:<API_PORT>/ws` (`@nestjs/websockets` with the `ws` adapter; the desktop uses the browser `WebSocket`). The upgrade is refused unless the `Origin` is one of the desktop origins. Messages: `{"event":"job.updated","data":<job>}`. The desktop reconnects with exponential backoff (1 s → 30 s). Job lists are not polled; imports still use Phase 2 polling.
 
 Example event:
 
@@ -1072,7 +1091,10 @@ When the Python service starts:
 
 Rendering is idempotent: clip IDs and output paths are deterministic (e.g. UUIDv5 of processing job ID + clip index in the validated plan), so a re-run overwrites its own outputs instead of creating duplicates.
 
-When NestJS starts, it reconciles non-terminal jobs older than a threshold via `GetAnalysisStatus` and marks jobs unknown to the Python service as failed.
+As implemented in Phase 3:
+- **No automatic requeue.** A job interrupted by a worker crash is reported `FAILED / INTERRUPTED` when the worker starts (RQ's started registry, executions removed), and its artifacts are deleted. The user can process again.
+- **API reconciler.** Every 30 s, NestJS checks jobs that have not changed for 30 s with `GetAnalysisStatus`. `UNKNOWN`, or `FINISHED` without a final event, becomes `FAILED / INTERRUPTED`. `QUEUED` or `RUNNING` is left alone. If the AI service is unreachable, nothing changes.
+- **Events.** Each worker event carries a per-job sequence number from Redis `INCR`. NestJS applies an event only if its sequence is newer and the job is not finished, in one guarded `UPDATE`. Its acknowledgement says `stop: true` when the job is gone or finished, so deleting a video or project, or cancelling while the AI service is unreachable, still stops the worker.
 
 ---
 
@@ -1296,6 +1318,8 @@ Acceptance criteria:
 ## Phase 3 — Media Processing Foundation
 
 Goal: Process source videos without AI.
+
+Spec: `spec/SPEC-phase-3.md`. Tasks: `tasks/phase-3-todo.md`. Status: done.
 
 Tasks:
 

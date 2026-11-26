@@ -1,5 +1,7 @@
 import { Link, Outlet } from "@tanstack/react-router";
 import { Activity, FolderOpen, type LucideIcon } from "lucide-react";
+import { useLiveJobUpdates } from "@/features/jobs/queries";
+import { liveEvents } from "@/lib/live-events";
 import { TitleBar } from "./title-bar";
 
 const NAV: { to: "/projects" | "/status"; label: string; icon: LucideIcon }[] = [
@@ -8,6 +10,7 @@ const NAV: { to: "/projects" | "/status"; label: string; icon: LucideIcon }[] = 
 ];
 
 export function AppShell() {
+  useLiveJobUpdates(liveEvents);
   return (
     <div className="flex h-screen flex-col">
       <TitleBar />

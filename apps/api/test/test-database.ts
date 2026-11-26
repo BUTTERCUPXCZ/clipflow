@@ -25,7 +25,7 @@ export class TestDatabase {
 
   /** Removes every row except the seeded local user. */
   async reset(): Promise<void> {
-    await this.db.execute(sql`TRUNCATE source_videos, projects`);
+    await this.db.execute(sql`TRUNCATE processing_jobs, source_videos, projects`);
     await this.db.execute(sql`DELETE FROM users WHERE id <> ${LOCAL_USER_ID}`);
   }
 

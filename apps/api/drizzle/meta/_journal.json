@@ -15,6 +15,20 @@
       "when": 1795681245302,
       "tag": "0001_seed_local_user",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795684254754,
+      "tag": "0002_media_metadata_and_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795685795809,
+      "tag": "0003_one_active_job_per_video",
+      "breakpoints": true
     }
   ]
 }

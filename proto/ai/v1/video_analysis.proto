@@ -3,15 +3,26 @@ syntax = "proto3";
 package ai.v1;
 
 // Internal contract: NestJS (client) -> Python AI service (server).
-// Phase 1 exposes only GetModelStatus; StartAnalysis, CancelAnalysis,
-// GetAnalysisStatus and RunVisualExperiment are added in later phases.
+// Media paths are always relative to MEDIA_ROOT; the server rejects any path that escapes it.
 service VideoAnalysisService {
   rpc GetModelStatus(GetModelStatusRequest) returns (GetModelStatusResponse);
+
+  // Synchronous FFprobe of an imported video (fast: well under a second).
+  rpc ProbeVideo(ProbeVideoRequest) returns (ProbeVideoResponse);
+
+  // Enqueue a processing job and return at once; progress arrives via JobEventsService.
+  // A repeated job_id is accepted without enqueuing twice.
+  rpc StartAnalysis(StartAnalysisRequest) returns (StartAnalysisResponse);
+  rpc CancelAnalysis(CancelAnalysisRequest) returns (CancelAnalysisResponse);
+  rpc GetAnalysisStatus(GetAnalysisStatusRequest) returns (GetAnalysisStatusResponse);
 }
 
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
   ERROR_CODE_MODEL_RUNTIME_UNAVAILABLE = 1;
+  ERROR_CODE_MEDIA_UNDECODABLE = 2;
+  ERROR_CODE_INVALID_PATH = 3;
+  ERROR_CODE_QUEUE_UNAVAILABLE = 4;
 }
 
 message GetModelStatusRequest {}
@@ -27,4 +38,64 @@ message GetModelStatusResponse {
   string configured_vision_model = 3;
   bool configured_vision_model_installed = 4;
   ErrorCode error_code = 5;
+}
+
+message ProbeVideoRequest {
+  string storage_path = 1;
+}
+
+message ProbeVideoResponse {
+  bool decodable = 1;
+  double duration_seconds = 2;
+  int32 width = 3;
+  int32 height = 4;
+  double frame_rate = 5;
+  string video_codec = 6;
+  string audio_codec = 7;  // empty when has_audio is false
+  bool has_audio = 8;
+  string container = 9;
+  ErrorCode error_code = 10;
+  string error_message = 11;
+}
+
+message AnalysisSettings {
+  double frame_interval_seconds = 1;
+  int32 frame_max_width = 2;
+}
+
+message StartAnalysisRequest {
+  string job_id = 1;
+  string storage_path = 2;    // source video
+  string artifacts_path = 3;  // directory to write audio + frames into
+  AnalysisSettings settings = 4;
+}
+
+message StartAnalysisResponse {
+  bool accepted = 1;
+  ErrorCode error_code = 2;
+  string error_message = 3;
+}
+
+message CancelAnalysisRequest {
+  string job_id = 1;
+}
+
+message CancelAnalysisResponse {
+  bool found = 1;
+}
+
+enum AnalysisState {
+  ANALYSIS_STATE_UNSPECIFIED = 0;
+  ANALYSIS_STATE_QUEUED = 1;
+  ANALYSIS_STATE_RUNNING = 2;
+  ANALYSIS_STATE_FINISHED = 3;
+  ANALYSIS_STATE_UNKNOWN = 4;
+}
+
+message GetAnalysisStatusRequest {
+  string job_id = 1;
+}
+
+message GetAnalysisStatusResponse {
+  AnalysisState state = 1;
 }

@@ -105,6 +105,13 @@ async def test_redis_error_when_unreachable(fake_redis):
     assert client.closed
 
 
+async def test_redis_malformed_url_is_reported_not_raised():
+    check = (await RedisCheck("not-a-redis-url").run())["redis"]
+
+    assert check.status == "error"
+    assert check.detail.startswith("invalid REDIS_URL")
+
+
 # --- FfmpegCheck ---
 
 

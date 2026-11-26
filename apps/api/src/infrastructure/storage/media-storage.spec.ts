@@ -33,6 +33,23 @@ describe('MediaStorage', () => {
     await expect(stat(storage.projectDir('u', 'p'))).rejects.toThrow();
   });
 
+  it('prunes the project directory when its last video directory is removed', async () => {
+    await mkdir(storage.videoDir('u', 'p', 'v1'), { recursive: true });
+
+    await storage.removeVideoDir('u', 'p', 'v1');
+
+    await expect(stat(storage.projectDir('u', 'p'))).rejects.toThrow();
+  });
+
+  it('keeps the project directory while other videos remain', async () => {
+    await mkdir(storage.videoDir('u', 'p', 'v1'), { recursive: true });
+    await mkdir(storage.videoDir('u', 'p', 'v2'), { recursive: true });
+
+    await storage.removeVideoDir('u', 'p', 'v1');
+
+    expect((await stat(storage.videoDir('u', 'p', 'v2'))).isDirectory()).toBe(true);
+  });
+
   it('detects paths inside MEDIA_ROOT, including through a symlink', async () => {
     const inside = join(storage.root, 'a.mp4');
     const outside = join(base, 'b.mp4');

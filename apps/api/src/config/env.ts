@@ -18,6 +18,14 @@ const envSchema = z.object({
     .string({ error: 'DATABASE_URL is required (PostgreSQL connection string)' })
     .regex(/^postgres(ql)?:\/\//, 'DATABASE_URL must start with postgres:// or postgresql://'),
   AI_GRPC_URL: z.string().min(1).default('localhost:50051'),
+  /** NestJS serves JobEventsService here; the Python worker reports to it. */
+  JOB_EVENTS_GRPC_URL: z
+    .string()
+    // Unauthenticated internal service: loopback only, like the HTTP API.
+    .regex(/^(localhost|127\.0\.0\.1):\d{1,5}$/, 'JOB_EVENTS_GRPC_URL must be localhost:<port> or 127.0.0.1:<port>')
+    .default('localhost:50052'),
+  FRAME_SAMPLE_INTERVAL: z.coerce.number().positive().max(60).default(1),
+  FRAME_MAX_WIDTH: z.coerce.number().int().min(64).max(3840).default(768),
   MEDIA_ROOT: z
     .string({ error: 'MEDIA_ROOT is required (directory for imported and generated media)' })
     .min(1)

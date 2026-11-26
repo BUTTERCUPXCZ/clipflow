@@ -35,6 +35,12 @@ describe('ProjectsController over HTTP', () => {
     expect(service.create).toHaveBeenCalledWith(expect.any(String), { name: 'Podcast' });
   });
 
+  it('stores a blank description as null', async () => {
+    await request(app.getHttpServer()).post('/projects').send({ name: 'Podcast', description: '   ' });
+
+    expect(service.create).toHaveBeenCalledWith(expect.any(String), { name: 'Podcast', description: null });
+  });
+
   it.each([
     [{}, 'Name is required'],
     [{ name: '   ' }, 'Name is required'],

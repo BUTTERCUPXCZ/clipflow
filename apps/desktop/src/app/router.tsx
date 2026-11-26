@@ -4,6 +4,7 @@ import { ProjectList } from "@/features/projects/components/project-list";
 import { ProjectPage } from "@/features/projects/components/project-page";
 import { SystemStatus } from "@/features/system/system-status";
 import { ProjectVideos } from "@/features/videos/components/project-videos";
+import { VideoPage } from "@/features/videos/components/video-page";
 
 const rootRoute = createRootRoute({ component: AppShell });
 
@@ -34,6 +35,15 @@ const projectRoute = createRoute({
   },
 });
 
+const videoRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/videos/$videoId",
+  component: function VideoRoute() {
+    const { projectId, videoId } = videoRoute.useParams();
+    return <VideoPage projectId={projectId} videoId={videoId} />;
+  },
+});
+
 const statusRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/status",
@@ -41,7 +51,7 @@ const statusRoute = createRoute({
 });
 
 export const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, projectsRoute, projectRoute, statusRoute]),
+  routeTree: rootRoute.addChildren([indexRoute, projectsRoute, projectRoute, videoRoute, statusRoute]),
 });
 
 declare module "@tanstack/react-router" {

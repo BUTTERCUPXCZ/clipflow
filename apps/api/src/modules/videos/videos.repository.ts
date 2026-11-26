@@ -29,6 +29,14 @@ export type NewImport = Pick<
   'id' | 'userId' | 'projectId' | 'filename' | 'storagePath' | 'fileSize' | 'mimeType'
 >;
 
+/** What FFprobe tells us about an imported video (all NULL when the probe could not run). */
+export type VideoMetadata = Partial<
+  Pick<
+    VideoRecord,
+    'duration' | 'width' | 'height' | 'frameRate' | 'videoCodec' | 'audioCodec' | 'hasAudio' | 'container'
+  >
+>;
+
 export function toVideo(record: VideoRecord): Video {
   const { userId: _userId, storagePath: _storagePath, ...video } = record;
   return video;
@@ -68,8 +76,8 @@ export class VideosRepository {
     return this.transition(id, { bytesCopied });
   }
 
-  markReady(id: string, bytesCopied: number): Promise<boolean> {
-    return this.transition(id, { status: 'READY', bytesCopied });
+  markReady(id: string, bytesCopied: number, metadata: VideoMetadata = {}): Promise<boolean> {
+    return this.transition(id, { status: 'READY', bytesCopied, ...metadata });
   }
 
   markFailed(id: string, errorMessage: string): Promise<boolean> {

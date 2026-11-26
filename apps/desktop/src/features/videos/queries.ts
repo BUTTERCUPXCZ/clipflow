@@ -20,6 +20,15 @@ export function useVideos(projectId: string) {
   });
 }
 
+/** One video; refetches every second while it is still importing (imports keep Phase 2 polling). */
+export function useVideo(videoId: string) {
+  return useQuery({
+    queryKey: ["videos", videoId],
+    queryFn: () => videosApi.get(videoId),
+    refetchInterval: (query) => (query.state.data?.status === "IMPORTING" ? POLL_INTERVAL_MS : false),
+  });
+}
+
 export interface ImportFailure {
   path: string;
   reason: string;

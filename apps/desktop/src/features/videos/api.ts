@@ -12,11 +12,15 @@ export interface Video {
   mimeType: string;
   status: VideoStatus;
   errorMessage: string | null;
-  /** duration/width/height/frameRate are filled by FFprobe in Phase 3 */
+  /** Filled by FFprobe when the import finishes; null if the AI service was unavailable then. */
   duration: number | null;
   width: number | null;
   height: number | null;
   frameRate: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  hasAudio: boolean | null;
+  container: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,6 +30,10 @@ export class VideosApi {
 
   list(projectId: string): Promise<Video[]> {
     return this.client.getJson(`/projects/${projectId}/videos`);
+  }
+
+  get(id: string): Promise<Video> {
+    return this.client.getJson(`/videos/${id}`);
   }
 
   /** Starts a background import (HTTP 202); the returned video is IMPORTING. */

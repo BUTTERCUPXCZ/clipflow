@@ -84,6 +84,12 @@ describe('ImportValidator', () => {
     expect(await rejection(await file('big.mp4', FIXTURE_HEADERS.mp4), small)).toMatch(/larger than the 100 B limit/);
   });
 
+  it('accepts a file of exactly the size limit (the spec says ≤ 50 GiB)', async () => {
+    const exact = new ImportValidator(storage, { maxBytes: FIXTURE_HEADERS.mp4.length, freeSpaceMarginBytes: 0 });
+
+    expect(await rejection(await file('exact.mp4', FIXTURE_HEADERS.mp4), exact)).toBe('accepted');
+  });
+
   it('rejects a file that is already inside MEDIA_ROOT', async () => {
     await mkdir(storage.root, { recursive: true });
     const path = join(storage.root, 'source.mp4');

@@ -17,6 +17,10 @@ const video = (overrides: Partial<Video> = {}): Video => ({
   width: null,
   height: null,
   frameRate: null,
+  videoCodec: null,
+  audioCodec: null,
+  hasAudio: null,
+  container: null,
   createdAt: "2026-11-26T05:00:00.000Z",
   updatedAt: "2026-11-26T05:00:00.000Z",
   ...overrides,
@@ -36,7 +40,7 @@ describe("VideoTable", () => {
     expect(await screen.findByText(/No videos yet/)).toBeInTheDocument();
   });
 
-  it("shows a ready video with its size and placeholders for Phase 3 metadata", async () => {
+  it("shows a ready video with placeholders when FFprobe has not run", async () => {
     mockApi({ "GET /projects/p1/videos": () => Response.json([video()]) });
 
     renderWithProviders(<VideoTable projectId="p1" />);
@@ -44,7 +48,25 @@ describe("VideoTable", () => {
     const row = (await screen.findByText("episode-12.mp4")).closest("tr")!;
     expect(within(row).getByText("2.0 GB")).toBeInTheDocument();
     expect(within(row).getByText("Ready")).toBeInTheDocument();
-    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(within(row).getAllByText("—")).toHaveLength(3);
+  });
+
+  it("shows probed metadata and links the name to the video page", async () => {
+    mockApi({
+      "GET /projects/p1/videos": () =>
+        Response.json([
+          video({ duration: 761.4, width: 1920, height: 1080, videoCodec: "h264", audioCodec: "aac", hasAudio: true }),
+        ]),
+    });
+
+    renderWithProviders(<VideoTable projectId="p1" />);
+
+    const link = await screen.findByRole("link", { name: "episode-12.mp4" });
+    expect(link).toHaveAttribute("href", "/projects/p1/videos/v1");
+    const row = link.closest("tr")!;
+    expect(within(row).getByText("12:41")).toBeInTheDocument();
+    expect(within(row).getByText("1920×1080")).toBeInTheDocument();
+    expect(within(row).getByText("H.264 / AAC")).toBeInTheDocument();
   });
 
   it("shows import progress as an accessible progress bar", async () => {

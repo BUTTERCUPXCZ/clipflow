@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     ai_http_port: int = 8000
     ai_grpc_port: int = 50051
     redis_url: str = "redis://localhost:6379/0"
+    job_events_grpc_url: str = "localhost:50052"
     ollama_base_url: str = "http://localhost:11434"
     media_root: Path = Path("~/.local/share/clipforge/media")
     vision_model: str = "qwen3-vl:8b-instruct"
