@@ -1,44 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { CircleCheck, CircleX, LoaderCircle, RefreshCw } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { API_URL, ApiUnreachableError } from "@/lib/api";
-import { type Check, fetchHealth, type HealthReport } from "./api";
-
-const LABELS: Record<keyof HealthReport["checks"], string> = {
-  database: "PostgreSQL",
-  ai_service: "AI service (gRPC)",
-  model_runtime: "Ollama runtime",
-  vision_model: "Vision model",
-};
+import { api } from "@/lib/api";
+import { fetchHealth } from "./api";
+import { StatusBadge } from "./status-badge";
+import { toStatusRows } from "./status-rows";
 
 export function SystemStatus() {
   const health = useQuery({ queryKey: ["system", "health"], queryFn: fetchHealth });
-
-  const unreachable = health.error instanceof ApiUnreachableError;
-
-  let apiCheck: Check | undefined;
-  if (health.isError) {
-    apiCheck = error(
-      unreachable ? `API unreachable at ${API_URL}. Is it running? (npm run dev:api)` : health.error.message,
-    );
-  } else if (!health.isPending) {
-    apiCheck = { status: "ok", detail: API_URL };
-  }
-
-  // On error, ignore `data`: TanStack keeps the last successful report after a failed refetch.
-  const dependencyCheck = (key: keyof HealthReport["checks"]): Check | undefined =>
-    health.isError
-      ? error(unreachable ? "unknown: API unreachable" : "unknown: health check failed")
-      : health.data?.checks[key];
-
-  const rows: [string, Check | undefined][] = [
-    ["NestJS API", apiCheck],
-    ...(Object.keys(LABELS) as (keyof HealthReport["checks"])[]).map(
-      (key): [string, Check | undefined] => [LABELS[key], dependencyCheck(key)],
-    ),
-  ];
+  const rows = toStatusRows(health, api.baseUrl);
 
   return (
     <Card className="max-w-2xl">
@@ -54,7 +25,7 @@ export function SystemStatus() {
       </CardHeader>
       <CardContent>
         <ul className="divide-y">
-          {rows.map(([label, check]) => (
+          {rows.map(({ label, check }) => (
             <li key={label} className="flex items-start justify-between gap-4 py-3">
               <div className="min-w-0">
                 <p className="font-medium">{label}</p>
@@ -66,31 +37,5 @@ export function SystemStatus() {
         </ul>
       </CardContent>
     </Card>
-  );
-}
-
-function error(detail: string): Check {
-  return { status: "error", detail };
-}
-
-function StatusBadge({ check }: { check: Check | undefined }) {
-  if (!check) {
-    return (
-      <Badge variant="outline">
-        <LoaderCircle className="animate-spin" aria-hidden />
-        Checking
-      </Badge>
-    );
-  }
-  return check.status === "ok" ? (
-    <Badge variant="secondary">
-      <CircleCheck className="text-emerald-600" aria-hidden />
-      OK
-    </Badge>
-  ) : (
-    <Badge variant="destructive">
-      <CircleX aria-hidden />
-      Error
-    </Badge>
   );
 }

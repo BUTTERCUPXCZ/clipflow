@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { api } from "@/lib/api";
 
 export interface Check {
   status: "ok" | "error";
@@ -17,7 +17,7 @@ export interface HealthReport {
 }
 
 export async function fetchHealth(): Promise<HealthReport> {
-  const res = await apiFetch("/health");
+  const res = await api.request("/health");
   // 503 means "API is up, a dependency is down": its body is still a report.
   if (res.status !== 200 && res.status !== 503) {
     throw new Error(`Unexpected health response: HTTP ${res.status}`);

@@ -1,21 +1,20 @@
 import grpc
-import httpx
 import structlog
 
 from app.generated.ai.v1 import video_analysis_pb2 as pb2
 from app.generated.ai.v1 import video_analysis_pb2_grpc as pb2_grpc
-from app.services.model_runtime import get_model_runtime_status
+from app.services.model_runtime import ModelRuntime
 
 log = structlog.get_logger()
 
 
 class VideoAnalysisServicer(pb2_grpc.VideoAnalysisServiceServicer):
-    def __init__(self, ollama: httpx.AsyncClient, vision_model: str) -> None:
-        self._ollama = ollama
+    def __init__(self, runtime: ModelRuntime, vision_model: str) -> None:
+        self._runtime = runtime
         self._vision_model = vision_model
 
     async def GetModelStatus(self, request, context):  # noqa: N802 (gRPC method name)
-        status = await get_model_runtime_status(self._ollama)
+        status = await self._runtime.status()
         if not status.reachable:
             log.warning("model_runtime_unreachable", error=status.error)
         return pb2.GetModelStatusResponse(

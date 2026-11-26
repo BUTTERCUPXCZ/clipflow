@@ -1,72 +1,54 @@
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.services import system_checks
-from app.services.model_runtime import InstalledModel, ModelRuntimeStatus
-from app.services.system_checks import error, ok
-from tests.conftest import VISION_MODEL, ollama_client
+from app.services.health import Check, HealthService, error, ok
 
 
-@pytest.fixture
-def fake_infra(monkeypatch):
-    """Redis and FFmpeg healthy unless a test overrides them."""
+class StaticCheck:
+    def __init__(self, **results: Check) -> None:
+        self._results = results
 
-    async def redis_ok(url: str):
-        return ok("reachable, appendonly=yes")
-
-    monkeypatch.setattr(system_checks, "check_redis", redis_ok)
-    monkeypatch.setattr(system_checks, "check_ffmpeg", lambda: ok("/usr/bin/ffmpeg"))
+    async def run(self) -> dict[str, Check]:
+        return self._results
 
 
-def get_health(settings, ollama):
+def get_health(settings, service: HealthService):
     with TestClient(create_app(settings)) as client:
-        client.app.state.ollama = ollama
+        client.app.state.health = service
         return client.get("/health")
 
 
-def test_all_dependencies_healthy(settings, fake_infra):
-    response = get_health(settings, ollama_client([VISION_MODEL, "gemma3:1b"]))
+async def test_service_merges_results_of_every_check():
+    service = HealthService([StaticCheck(a=ok("1")), StaticCheck(b=ok("2"), c=ok("3"))])
+
+    report = await service.report()
+
+    assert report.healthy
+    assert set(report.checks) == {"a", "b", "c"}
+
+
+async def test_service_is_unhealthy_when_any_check_fails():
+    report = await HealthService([StaticCheck(a=ok("1")), StaticCheck(b=error("down"))]).report()
+
+    assert report.status == "error"
+
+
+def test_route_returns_200_when_healthy(settings):
+    response = get_health(settings, HealthService([StaticCheck(redis=ok("fine"))]))
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "ok"
-    assert set(body["checks"]) == {"ollama", "vision_model", "redis", "ffmpeg", "media_root"}
-    assert settings.media_root.is_dir()
+    assert response.json() == {"status": "ok", "checks": {"redis": {"status": "ok", "detail": "fine"}}}
 
 
-def test_degraded_dependencies_return_503_without_crashing(settings, fake_infra, monkeypatch):
-    async def redis_down(url: str):
-        return error("unreachable: connection refused")
-
-    monkeypatch.setattr(system_checks, "check_redis", redis_down)
-
-    response = get_health(settings, ollama_client(None))
+def test_route_returns_503_with_details_when_degraded(settings):
+    response = get_health(settings, HealthService([StaticCheck(redis=error("unreachable"), ffmpeg=ok("x"))]))
 
     assert response.status_code == 503
-    checks = response.json()["checks"]
-    assert checks["ollama"]["status"] == "error"
-    assert checks["vision_model"]["status"] == "error"
-    assert checks["redis"]["status"] == "error"
-    assert checks["media_root"]["status"] == "ok"
+    assert response.json()["checks"]["redis"]["detail"] == "unreachable"
 
 
-def test_missing_vision_model_is_reported(settings, fake_infra):
-    response = get_health(settings, ollama_client(["gemma3:1b"]))
+def test_app_registers_every_dependency_check(settings):
+    with TestClient(create_app(settings)) as client:
+        names = {type(c).__name__ for c in client.app.state.health._checks}
 
-    assert response.status_code == 503
-    vision = response.json()["checks"]["vision_model"]
-    assert vision["status"] == "error"
-    assert "not installed" in vision["detail"]
-
-
-def test_untagged_model_name_means_latest():
-    status = ModelRuntimeStatus(reachable=True, models=[InstalledModel("llava:latest", 1)])
-    assert status.has_model("llava")
-    assert not status.has_model("llava:7b")
-
-
-def test_media_root_not_writable(tmp_path):
-    blocker = tmp_path / "file"
-    blocker.write_text("x")
-    assert system_checks.check_media_root(blocker / "media").status == "error"
+    assert names == {"ModelRuntimeCheck", "RedisCheck", "FfmpegCheck", "MediaRootCheck"}

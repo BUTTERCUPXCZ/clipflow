@@ -1,6 +1,7 @@
-"""Ollama runtime status. Shared by the HTTP health check and the gRPC GetModelStatus."""
+"""Local model runtime (Ollama). Shared by the health checks and the gRPC GetModelStatus."""
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import httpx
 
@@ -23,15 +24,25 @@ class ModelRuntimeStatus:
         return any(m.name == wanted for m in self.models)
 
 
-async def get_model_runtime_status(client: httpx.AsyncClient) -> ModelRuntimeStatus:
-    """`client` must have base_url set to the Ollama server."""
-    try:
-        response = await client.get("/api/tags")
-        response.raise_for_status()
-        models = [
-            InstalledModel(name=m["name"], size_bytes=int(m.get("size", 0)))
-            for m in response.json().get("models", [])
-        ]
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-        return ModelRuntimeStatus(reachable=False, error=str(exc) or type(exc).__name__)
-    return ModelRuntimeStatus(reachable=True, models=models)
+class ModelRuntime(Protocol):
+    """What consumers need from a model runtime; swap Ollama for another runtime behind this."""
+
+    async def status(self) -> ModelRuntimeStatus: ...
+
+
+class OllamaRuntime:
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        """`client` must have base_url set to the Ollama server."""
+        self._client = client
+
+    async def status(self) -> ModelRuntimeStatus:
+        try:
+            response = await self._client.get("/api/tags")
+            response.raise_for_status()
+            models = [
+                InstalledModel(name=m["name"], size_bytes=int(m.get("size", 0)))
+                for m in response.json().get("models", [])
+            ]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            return ModelRuntimeStatus(reachable=False, error=str(exc) or type(exc).__name__)
+        return ModelRuntimeStatus(reachable=True, models=models)
